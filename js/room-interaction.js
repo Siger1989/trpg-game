@@ -1,236 +1,177 @@
 /**
- * 房间交互系统 V1
- * 统一执行器：文本输入、UI热点、空间位置、对象状态、反馈文本全部基于同一套状态模型
- *
+ * 房间交互系统 V1 — 统一交互执行器
+ * 
  * 核心原则：
+ * - 所有交互入口（文本输入/UI热点/快捷键）必须走同一个执行器
+ * - 规则层优先，文本层只负责表达
  * - AI不能直接决定房间交互结果
- * - 所有交互先经本地规则层：输入分类→目标绑定→可见性→距离→动作合法性→反馈文本
  * - 当前版本不支持自动移动，超距一律返回"需要先靠近"
- *
+ * 
  * 模块：RoomState / InputClassifier / TargetBinder / ActionValidator / ActionExecutor / TextPresenter
  */
 
 const RoomInteraction = (() => {
 
-  // ========== 1. 类型常量 ==========
+  // ========== 1. 类型定义（JS注释形式） ==========
+  // ActionResultCode: "OK" | "TARGET_NOT_FOUND" | "TARGET_NOT_VISIBLE" |
+  //   "OUT_OF_RANGE" | "ACTION_NOT_ALLOWED" | "AP_NOT_ENOUGH" | "AMBIGUOUS_TARGET" | "UNKNOWN"
+  // InputIntent: "describe" | "move" | "interact" | "composite" | "flavor" | "unknown"
+  // ActionType: "inspect" | "turn_on" | "ignite" | "turn_off" | "extinguish" |
+  //   "push" | "enter" | "approach" | "investigate" | "search" | "open" | "toggle_light"
 
-  const InputIntent = {
-    DESCRIBE: 'describe',
-    MOVE: 'move',
-    INTERACT: 'interact',
-    COMPOSITE: 'composite',
-    FLAVOR: 'flavor',
-    UNKNOWN: 'unknown'
-  };
-
-  const ActionResultCode = {
-    OK: 'OK',
-    TARGET_NOT_FOUND: 'TARGET_NOT_FOUND',
-    TARGET_NOT_VISIBLE: 'TARGET_NOT_VISIBLE',
-    OUT_OF_RANGE: 'OUT_OF_RANGE',
-    ACTION_NOT_ALLOWED: 'ACTION_NOT_ALLOWED',
-    AP_NOT_ENOUGH: 'AP_NOT_ENOUGH',
-    AMBIGUOUS_TARGET: 'AMBIGUOUS_TARGET',
-    UNKNOWN: 'UNKNOWN'
-  };
-
-  // ========== 2. RoomState 构建 ==========
-
-  /**
-   * 从SceneManager的sceneObjects构建RoomState快照
-   * @param {Array} sceneObjects - SceneManager.sceneObjects
-   * @param {{x:number, z:number}} playerPos - 玩家格子坐标
-   * @param {Object} scene - DMEngine.getCurrentScene()
-   * @returns {Object} RoomState
-   */
-  function buildRoomState(sceneObjects, playerPos, scene) {
-    const objects = (sceneObjects || []).map(obj => {
-      const id = obj.id || `${obj.type}_${obj.gridX}_${obj.gridZ}`;
-      return {
-        id: id,
-        name: obj.name || obj.type,
-        aliases: obj.aliases || [obj.name || obj.type],
-        type: obj.isLight ? 'interactive' : (obj.type === 'door' ? 'exit' : 'interactive'),
-        objType: obj.type, // 保留原始类型用于执行
-
-        position: { x: obj.gridX || 0, y: obj.gridZ || 0 },
-        visible: true,
-        discovered: true,
-        reachable: !obj.blockMove,
-        interactable: true,
-        interactionRange: obj.interactionRange || 1.5,
-
-        availableActions: mapAvailableActions(obj.availableActions || [], obj),
-        state: {
-          isOn: obj.isOn || false,
-          isLight: obj.isLight || false,
-          isOpen: obj.isOn || false,
-          blockMove: obj.blockMove || false,
-          searched: false
-        },
-        description: '',
-
-        // 保留原始引用，用于执行时修改真实状态
-        _ref: obj
-      };
-    });
-
-    return {
-      roomId: scene?.id || scene?.room || 'unknown',
-      roomName: scene?.name || '未知房间',
-      playerPosition: { x: playerPos?.x || 0, y: playerPos?.z || 0 },
-      playerFacing: 'NE',
-      ap: (typeof DMEngine !== 'undefined' && DMEngine.getAP) ? DMEngine.getAP().current : 2,
-      turn: 1,
-      objects: objects
-    };
-  }
-
-  /**
-   * 将scene-manager的availableActions映射为文档定义的ActionType
-   * toggle_light → turn_on/turn_off/ignite/extinguish
-   * investigate/inspect → inspect
-   * open → open
-   * search → inspect
-   */
-  function mapAvailableActions(actions, obj) {
-    const mapped = [];
-    for (const a of actions) {
-      switch (a) {
-        case 'toggle_light':
-          // 灯类：turn_on/turn_off；壁炉/蜡烛：ignite/extinguish
-          if (obj.type === 'fireplace' || obj.type === 'candle') {
-            mapped.push('ignite');
-            mapped.push('extinguish');
-          } else {
-            mapped.push('turn_on');
-            mapped.push('turn_off');
-          }
-          break;
-        case 'investigate':
-        case 'inspect':
-        case 'search':
-          if (!mapped.includes('inspect')) mapped.push('inspect');
-          break;
-        case 'open':
-          mapped.push('open');
-          break;
-        default:
-          mapped.push(a);
-      }
-    }
-    if (mapped.length === 0) mapped.push('inspect');
-    return mapped;
-  }
-
-  // ========== 3. InputClassifier — 输入分类 ==========
-
+  // ========== 2. 输入分类器 ==========
   function classifyInput(text) {
     const t = text.trim();
 
-    // describe: 观察环境
-    if (/什么样|看看|四周|这里有什么|有门吗|有出口吗|房间|出口|我现在在哪|环境|周围|有什么|描述/.test(t)) {
-      return InputIntent.DESCRIBE;
+    // describe — 观察环境，不执行对象动作
+    if (/什么样|看看|四周|这里有什么|有门吗|有出口吗|房间|出口|我现在在哪|环境|周围|场景/.test(t)) {
+      return 'describe';
     }
 
-    // composite: 同时包含"靠近/过去"和"执行动作"
-    if (/(去|走到|走向|靠近|过去|走过去|跑过去).*(调查|查看|开灯|生火|点燃|进入|打开|检查|搜)/.test(t)) {
-      return InputIntent.COMPOSITE;
+    // composite — 同时包含"靠近/过去"和"执行动作"
+    if (/(去|走到|走向|靠近|过去|过来).*(调查|查看|开灯|生火|点燃|进入|检查|搜索|打开|翻开)/.test(t)) {
+      return 'composite';
     }
     // "我去开灯" "我去调查" 等简短复合
-    if (/我去*(开灯|生火|调查|查看|检查|打开|点燃|搜)/.test(t)) {
-      return InputIntent.COMPOSITE;
+    if (/我去|我想去|我要去/.test(t) && /(调查|查看|开灯|生火|点燃|进入|检查|搜索|打开|翻开)/.test(t)) {
+      return 'composite';
     }
 
-    // interact: 对明确目标执行动作
-    if (/开灯|关灯|调查|查看|观察|生火|点燃|点火|推|进入|出去|离开|打开|关上|检查|搜索|翻|拿|取|搬|吹灭|熄火/.test(t)) {
-      return InputIntent.INTERACT;
+    // interact — 对明确目标执行动作
+    if (/开灯|关灯|打开灯|点灯|调查|查看|观察|生火|点燃|点火|进入|出去|离开|推|检查|搜索|打开|翻开|吹灭|熄火|关掉/.test(t)) {
+      return 'interact';
     }
 
-    // move: 仅表达移动意图
-    if (/往左|往右|往前|往后|移动|走|靠近|去|过来|过去/.test(t)) {
-      return InputIntent.MOVE;
+    // move — 仅表达移动意图
+    if (/往左|往右|往前|往后|移动|走|靠近|去|走向|走到/.test(t)) {
+      return 'move';
     }
 
-    // flavor: 情绪或氛围输入
-    if (/阴森|害怕|紧张|小心|恐惧|不安|可怕|恐怖|冷|发抖/.test(t)) {
-      return InputIntent.FLAVOR;
+    // flavor — 情绪或氛围输入
+    if (/阴森|害怕|紧张|小心|恐怖|可怕|不安|恐惧|发抖|冷/.test(t)) {
+      return 'flavor';
     }
 
-    return InputIntent.UNKNOWN;
+    return 'unknown';
   }
 
-  // ========== 4. 动词解析 ==========
-
+  // ========== 3. 动词解析 ==========
   function parseVerb(text) {
     const t = text.trim();
-    // 顺序很重要：先匹配更具体的
-    if (/吹灭|熄火|关灯|关掉/.test(t)) return 'turn_off';
-    if (/开灯|打开灯|点灯|开灯/.test(t)) return 'turn_on';
+
+    // 灯光操作
+    if (/开灯|打开灯|点灯/.test(t)) return 'turn_on';
+    if (/关灯|关掉灯/.test(t)) return 'turn_off';
+
+    // 火焰操作
     if (/生火|点燃|点火/.test(t)) return 'ignite';
-    if (/调查|查看|观察|检查|搜索|翻|搜/.test(t)) return 'inspect';
+    if (/吹灭|熄火/.test(t)) return 'extinguish';
+
+    // 调查/检查
+    if (/调查|查看|观察|检查/.test(t)) return 'inspect';
+
+    // 搜索
+    if (/搜索|翻开|翻找/.test(t)) return 'search';
+
+    // 开门/打开
+    if (/打开|推开/.test(t)) return 'open';
+
+    // 进入/离开
     if (/进入|出去|离开/.test(t)) return 'enter';
-    if (/打开|开/.test(t)) return 'open';
-    if (/推/.test(t)) return 'push';
+
+    // 靠近
     if (/靠近|走到|走向|过去|过来/.test(t)) return 'approach';
+
+    // 推
+    if (/推/.test(t)) return 'push';
+
+    // toggle_light — 兼容旧动作名
+    if (/开关灯|切换灯/.test(t)) return 'toggle_light';
+
     return undefined;
   }
 
-  // ========== 5. TargetBinder — 目标绑定 ==========
-
+  // ========== 4. 目标绑定器 ==========
   /**
    * 绑定顺序：
-   * 1. 别名或名称直接命中
-   * 2. 动作唯一反推
-   * 3. 多目标冲突→报歧义
-   * 4. 无法确认→找不到目标
+   * 1. 别名/名称直接命中
+   * 2. 动作唯一反推（只有一个对象支持该动作）
+   * 3. 多目标冲突报歧义
+   * 4. 无法确认报找不到
    */
   function bindTarget(text, verb, room) {
     const candidates = room.objects.filter(o => o.visible && o.discovered);
 
     // 1. 别名或名称直接命中
+    const directMatches = [];
     for (const obj of candidates) {
-      const allNames = [obj.name, ...obj.aliases];
-      for (const alias of allNames) {
+      const names = [obj.name, ...(obj.aliases || [])];
+      // 按匹配长度降序排列，优先匹配更具体的名称
+      for (const alias of names) {
         if (alias && text.includes(alias)) {
-          return obj;
+          directMatches.push({ obj, aliasLen: alias.length });
         }
       }
+    }
+    if (directMatches.length > 0) {
+      // 按别名长度降序，优先匹配更具体的
+      directMatches.sort((a, b) => b.aliasLen - a.aliasLen);
+      return directMatches[0].obj;
     }
 
     // 2. 动作唯一反推
     if (verb) {
-      const actionCandidates = candidates.filter(o => o.availableActions.includes(verb));
+      // 将文档动作映射到对象availableActions
+      const actionMap = mapVerbToActions(verb);
+      const actionCandidates = candidates.filter(o => {
+        const actions = o.availableActions || [];
+        return actionMap.some(a => actions.includes(a));
+      });
       if (actionCandidates.length === 1) {
         return actionCandidates[0];
       }
       if (actionCandidates.length > 1) {
-        // 多目标冲突→返回歧义标记对象
-        return { id: '__AMBIGUOUS__', name: '多个目标', ambiguous: true, candidates: actionCandidates };
+        // 歧义：返回特殊标记
+        return { _ambiguous: true, candidates: actionCandidates };
       }
     }
 
     return null;
   }
 
-  // ========== 6. 解析总函数 ==========
-
-  function parseAction(text, room) {
-    const intent = classifyInput(text);
-    const verb = parseVerb(text);
-    const target = bindTarget(text, verb, room);
-
-    return {
-      intent: intent,
-      verb: verb,
-      targetId: target ? target.id : undefined,
-      target: target,
-      rawText: text
-    };
+  /**
+   * 将文档级动词映射到对象的availableActions
+   * turn_on/turn_off → toggle_light
+   * ignite/extinguish → toggle_light（火焰类物件）
+   * inspect → inspect/investigate
+   * search → search
+   * open → open
+   */
+  function mapVerbToActions(verb) {
+    switch (verb) {
+      case 'turn_on':
+      case 'turn_off':
+      case 'toggle_light':
+        return ['toggle_light'];
+      case 'ignite':
+      case 'extinguish':
+        return ['toggle_light', 'ignite'];
+      case 'inspect':
+        return ['inspect', 'investigate'];
+      case 'search':
+        return ['search', 'investigate'];
+      case 'open':
+        return ['open'];
+      case 'enter':
+        return ['enter'];
+      case 'push':
+        return ['push'];
+      default:
+        return [verb];
+    }
   }
 
-  // ========== 7. 距离判定 ==========
-
+  // ========== 5. 距离判定 ==========
   function distance(a, b) {
     const dx = a.x - b.x;
     const dy = a.y - b.y;
@@ -241,249 +182,320 @@ const RoomInteraction = (() => {
     return distance(playerPos, obj.position) <= obj.interactionRange;
   }
 
-  // ========== 8. describeRoom — 场景描述 ==========
-
-  function describeRoom(room) {
-    const visible = room.objects.filter(o => o.visible);
-    const parts = [];
-
-    parts.push(`你正身处${room.roomName}。`);
-
-    // 按类型分组描述
-    const lights = visible.filter(o => o.state.isLight);
-    const doors = visible.filter(o => o.objType === 'door');
-    const furniture = visible.filter(o => !o.state.isLight && o.objType !== 'door');
-    const litLights = lights.filter(o => o.state.isOn);
-    const unlitLights = lights.filter(o => !o.state.isOn);
-
-    if (litLights.length > 0) {
-      const names = litLights.map(o => o.name).join('、');
-      parts.push(`${names}正亮着，光芒驱散了部分黑暗。`);
-    }
-    if (unlitLights.length > 0) {
-      const names = unlitLights.map(o => o.name).join('、');
-      parts.push(`${names}暗着，似乎可以点亮。`);
-    }
-    if (doors.length > 0) {
-      const doorNames = doors.map(o => o.name).join('、');
-      parts.push(`房间里有${doorNames}。`);
-    }
-    if (furniture.length > 0) {
-      const furnNames = furniture.map(o => o.name).join('、');
-      parts.push(`周围还能看到${furnNames}。`);
-    }
-
-    // 出口提示
-    const exits = visible.filter(o => o.availableActions.includes('enter'));
-    if (exits.length > 0) {
-      parts.push('房间边缘有可以通行的出口。');
-    }
-
-    return parts.join('');
-  }
-
-  // ========== 9. 超距反馈模板 ==========
-
-  function buildOutOfRangeMessage(target, parsed) {
-    const name = target.name;
-    switch (parsed.verb) {
-      case 'turn_on':
-        return `你看见${name}了，但它离你还有几步，暂时够不着。先移动到附近再尝试操作。`;
-      case 'turn_off':
-        return `你看见${name}还亮着，但离得太远够不到。先走近些。`;
-      case 'ignite':
-        return `你看向${name}，但你现在还没走到它旁边。先靠近它，再尝试生火。`;
-      case 'extinguish':
-        return `${name}还在燃烧，但你离得太远。先走近些再尝试熄灭。`;
-      case 'inspect':
-        return `你能看见${name}，但离得还不够近，暂时没法仔细调查。`;
-      case 'enter':
-        return `出口就在那边，但你还没走到门口。`;
-      case 'open':
-        return `你看见${name}了，但距离太远。先走近些再尝试打开。`;
-      case 'approach':
-        return `目标就在前方，请使用移动模式靠近。`;
-      default:
-        return `你看见${name}了，但现在距离还不够近。`;
-    }
-  }
-
-  // ========== 10. ActionExecutor — 动作执行 ==========
-
+  // ========== 6. RoomState构建 ==========
   /**
-   * 执行动作并修改真实场景状态
-   * 所有状态修改都在这里完成，不依赖大模型
+   * 从SceneManager的sceneObjects构建RoomState
+   * @param {Array} sceneObjects - SceneManager.sceneObjects
+   * @param {{x:number, z:number}} playerPos - 玩家格子坐标
+   * @param {Object} scene - DMEngine.getCurrentScene()
+   * @returns {Object} RoomState
+   */
+  function buildRoomState(sceneObjects, playerPos, scene) {
+    const objects = (sceneObjects || []).map(obj => {
+      // 判断可见性和发现状态
+      // 当前MVP：所有场景对象默认可见和已发现
+      // 未来接入迷雾系统后，根据FogOfWar状态判断
+      const visible = true; // TODO: 接入FogOfWar
+      const discovered = true; // TODO: 接入FogOfWar
+
+      // 判断可交互性
+      const interactable = visible && discovered && (obj.availableActions || []).length > 0;
+
+      // 对象类型分类
+      let objType = 'decoration';
+      if (obj.isLight || obj.type === 'door') {
+        objType = 'interactive';
+      } else if ((obj.availableActions || []).length > 0) {
+        objType = 'interactive';
+      }
+
+      // 对象状态
+      const state = {};
+      if (obj.isLight) {
+        state.on = obj.isOn || false;
+        state.lit = obj.isOn || false;
+      }
+      if (obj.type === 'door') {
+        state.open = obj.isOn || false; // door的isOn表示isOpen
+      }
+      if (obj.type === 'chest' || obj.type === 'crate' || obj.type === 'wardrobe') {
+        state.searched = false;
+        state.open = obj.isOn || false;
+      }
+
+      // 将availableActions中的旧动作名映射到文档动作名
+      const docActions = (obj.availableActions || []).map(a => {
+        if (a === 'toggle_light') return obj.isLight ? (obj.isOn ? 'turn_off' : 'turn_on') : 'toggle_light';
+        if (a === 'investigate') return 'inspect';
+        return a;
+      });
+      // 去重
+      const uniqueActions = [...new Set(docActions)];
+
+      return {
+        id: obj.id || `${obj.type}_${obj.gridX}_${obj.gridZ}`,
+        name: obj.name || obj.type,
+        aliases: obj.aliases || [obj.name || obj.type],
+        type: objType,
+        position: { x: obj.gridX || 0, y: obj.gridZ || 0 },
+        visible,
+        discovered,
+        reachable: visible, // MVP: 可见=可达
+        interactable,
+        interactionRange: obj.interactionRange || 1.5,
+        availableActions: uniqueActions,
+        state,
+        description: obj.hint || '',
+        // 保留原始引用，供ActionExecutor修改真实状态
+        _ref: obj
+      };
+    });
+
+    // 获取AP
+    let ap = 2;
+    if (typeof DMEngine !== 'undefined' && DMEngine.getAP) {
+      const apData = DMEngine.getAP();
+      ap = apData.current || 2;
+    }
+
+    return {
+      roomId: scene?.id || scene?.room || 'unknown',
+      roomName: scene?.name || '未知房间',
+      playerPosition: { x: playerPos?.x || 0, y: playerPos?.z || 0 },
+      playerFacing: 'NE', // MVP: 固定朝向
+      ap,
+      turn: 1, // TODO: 接入回合系统
+      objects
+    };
+  }
+
+  // ========== 7. 动作执行器 ==========
+  /**
+   * 执行动作，修改真实对象状态
+   * 所有状态修改都由此函数完成
    */
   function performAction(target, verb, room) {
     if (!verb) {
       return {
         success: false,
-        code: ActionResultCode.UNKNOWN,
+        code: 'UNKNOWN',
         targetId: target.id,
-        verb: verb,
+        verb,
         message: '你试着做点什么，但动作还不够明确。'
       };
     }
 
-    const ref = target._ref; // 原始sceneObject引用
+    const ref = target._ref; // SceneManager中的真实对象引用
 
-    // inspect: 调查检定
+    // inspect / investigate — 调查检定
     if (verb === 'inspect') {
-      // AP消耗由外层处理（game.js的sendPlayerInput已经扣了1AP）
-      // 这里不重复扣AP
-      return performInspect(target, ref, room);
-    }
+      // 不扣AP（由game.js统一扣），只返回调查文案
+      const skillMap = {
+        bookshelf: '图书馆使用', desk: '图书馆使用', table: '侦查',
+        chest: '锁匠', crate: '侦查', barrel: '侦查',
+        altar: '神秘学', statue: '神秘学', mirror: '侦查',
+        painting: '艺术', wardrobe: '侦查', bed: '侦查',
+        skeleton: '医学', rug: '侦查', fireplace: '侦查',
+        lamp: '侦查', candle: '侦查', door: '侦查'
+      };
+      const skill = skillMap[ref?.type] || '侦查';
+      let checkResult = null;
+      if (typeof CoCRules !== 'undefined' && typeof GameState !== 'undefined') {
+        const player = GameState.getPlayer();
+        if (player) {
+          const skillValue = player.skills[skill] || CoCRules.calcSkillBase(skill, player.stats);
+          checkResult = CoCRules.rollCheck(skillValue);
+        }
+      }
 
-    // turn_on: 开灯类
-    if (verb === 'turn_on' && target.state.isLight) {
-      if (target.state.isOn) {
-        return {
-          success: false,
-          code: ActionResultCode.ACTION_NOT_ALLOWED,
-          targetId: target.id,
-          verb: verb,
-          message: `${target.name}已经亮着了。`
-        };
+      let message = '';
+      if (checkResult) {
+        message = `[${skill}检定: ${checkResult.roll}/${checkResult.value} → ${checkResult.result}] `;
+        if (checkResult.isSuccess) {
+          message += getInspectSuccessText(target, ref);
+        } else {
+          message += `你仔细检查了${target.name}，但没有发现什么特别的东西。`;
+        }
+      } else {
+        message = getInspectSuccessText(target, ref);
       }
-      // 执行开灯
-      if (ref && typeof SceneManager !== 'undefined' && SceneManager.toggleObjectLight) {
-        SceneManager.toggleObjectLight(ref.gridX, ref.gridZ);
-      }
-      target.state.isOn = true;
+
+      // 标记已搜索
+      if (target.state) target.state.searched = true;
+
       return {
         success: true,
-        code: ActionResultCode.OK,
+        code: 'OK',
         targetId: target.id,
-        verb: verb,
-        message: buildTurnOnMessage(target)
+        verb,
+        message
       };
     }
 
-    // turn_off: 关灯类
-    if (verb === 'turn_off' && target.state.isLight) {
-      if (!target.state.isOn) {
-        return {
-          success: false,
-          code: ActionResultCode.ACTION_NOT_ALLOWED,
-          targetId: target.id,
-          verb: verb,
-          message: `${target.name}本来就是暗的。`
-        };
+    // search — 搜索（类似inspect但更侧重发现物品）
+    if (verb === 'search') {
+      let message = `你仔细搜索了${target.name}...`;
+      if (ref?.type === 'bookshelf') {
+        message = '你逐一扫过书架上的书脊，有几本引起了你的注意...';
+      } else if (ref?.type === 'desk') {
+        message = '你拉开书桌的抽屉，翻找着里面的物品...';
+      } else if (ref?.type === 'wardrobe') {
+        message = '你打开衣柜，在衣物间仔细翻找...';
       }
-      if (ref && typeof SceneManager !== 'undefined' && SceneManager.toggleObjectLight) {
-        SceneManager.toggleObjectLight(ref.gridX, ref.gridZ);
-      }
-      target.state.isOn = false;
+      if (target.state) target.state.searched = true;
       return {
         success: true,
-        code: ActionResultCode.OK,
+        code: 'OK',
         targetId: target.id,
-        verb: verb,
-        message: buildTurnOffMessage(target)
+        verb,
+        message
       };
     }
 
-    // ignite: 点燃（壁炉/蜡烛）
-    if (verb === 'ignite' && target.state.isLight) {
-      if (target.state.isOn) {
+    // turn_on / ignite — 开灯/生火
+    if (verb === 'turn_on' || verb === 'ignite') {
+      if (!ref?.isLight) {
         return {
           success: false,
-          code: ActionResultCode.ACTION_NOT_ALLOWED,
+          code: 'ACTION_NOT_ALLOWED',
           targetId: target.id,
-          verb: verb,
-          message: `${target.name}已经点着了。`
+          verb,
+          message: `${target.name}并不是可以点亮的物件。`
         };
       }
-      if (ref && typeof SceneManager !== 'undefined' && SceneManager.toggleObjectLight) {
+      if (ref.isOn) {
+        return {
+          success: false,
+          code: 'ACTION_NOT_ALLOWED',
+          targetId: target.id,
+          verb,
+          message: `${target.name}已经是亮着的了。`
+        };
+      }
+      // 执行开灯/生火
+      if (typeof SceneManager !== 'undefined' && SceneManager.toggleObjectLight) {
         SceneManager.toggleObjectLight(ref.gridX, ref.gridZ);
       }
-      target.state.isOn = true;
+      const actionText = verb === 'ignite' ? '点燃' : '打开';
+      const lightText = ref.type === 'fireplace' ? '火焰很快在可燃物上蔓延开来，微弱的火光照亮了周围。'
+        : ref.type === 'candle' ? '你小心翼翼地划亮火柴，点燃了蜡烛。微弱的烛光摇曳着亮了起来。'
+        : '光芒驱散了周围的黑暗。';
       return {
         success: true,
-        code: ActionResultCode.OK,
+        code: 'OK',
         targetId: target.id,
-        verb: verb,
-        message: buildIgniteMessage(target)
+        verb,
+        message: `你${actionText}了${target.name}，${lightText}`
       };
     }
 
-    // extinguish: 熄灭
-    if (verb === 'extinguish' && target.state.isLight) {
-      if (!target.state.isOn) {
+    // turn_off / extinguish — 关灯/熄火
+    if (verb === 'turn_off' || verb === 'extinguish') {
+      if (!ref?.isLight) {
         return {
           success: false,
-          code: ActionResultCode.ACTION_NOT_ALLOWED,
+          code: 'ACTION_NOT_ALLOWED',
           targetId: target.id,
-          verb: verb,
-          message: `${target.name}没有在燃烧。`
+          verb,
+          message: `${target.name}并不是可以熄灭的物件。`
         };
       }
-      if (ref && typeof SceneManager !== 'undefined' && SceneManager.toggleObjectLight) {
+      if (!ref.isOn) {
+        return {
+          success: false,
+          code: 'ACTION_NOT_ALLOWED',
+          targetId: target.id,
+          verb,
+          message: `${target.name}并没有亮着。`
+        };
+      }
+      // 执行关灯/熄火
+      if (typeof SceneManager !== 'undefined' && SceneManager.toggleObjectLight) {
         SceneManager.toggleObjectLight(ref.gridX, ref.gridZ);
       }
-      target.state.isOn = false;
+      const actionText = verb === 'extinguish' ? '熄灭了' : '关掉了';
       return {
         success: true,
-        code: ActionResultCode.OK,
+        code: 'OK',
         targetId: target.id,
-        verb: verb,
-        message: buildExtinguishMessage(target)
+        verb,
+        message: `你${actionText}${target.name}，黑暗重新笼罩了这片区域。`
       };
     }
 
-    // open: 开门/开箱
+    // open — 开门/开箱
     if (verb === 'open') {
-      if (target.objType === 'door') {
-        if (target.state.isOpen) {
+      if (ref?.type === 'door') {
+        if (ref.isOn) { // door的isOn表示isOpen
           return {
             success: false,
-            code: ActionResultCode.ACTION_NOT_ALLOWED,
+            code: 'ACTION_NOT_ALLOWED',
             targetId: target.id,
-            verb: verb,
-            message: `${target.name}已经开着了。`
+            verb,
+            message: `${target.name}已经是打开的了。`
           };
         }
-        if (ref && typeof SceneManager !== 'undefined' && SceneManager.toggleDoor) {
+        if (typeof SceneManager !== 'undefined' && SceneManager.toggleDoor) {
           SceneManager.toggleDoor(ref.gridX, ref.gridZ);
         }
-        target.state.isOpen = true;
         return {
           success: true,
-          code: ActionResultCode.OK,
+          code: 'OK',
           targetId: target.id,
-          verb: verb,
+          verb,
           message: `你推开了${target.name}，门轴发出刺耳的声响。`
         };
       }
-      // 其他可打开物件（箱子等）
+      // 箱子/衣柜等
+      if (target.state?.open) {
+        return {
+          success: false,
+          code: 'ACTION_NOT_ALLOWED',
+          targetId: target.id,
+          verb,
+          message: `${target.name}已经是打开的了。`
+        };
+      }
+      if (target.state) target.state.open = true;
       return {
         success: true,
-        code: ActionResultCode.OK,
+        code: 'OK',
         targetId: target.id,
-        verb: verb,
-        message: `你打开了${target.name}，仔细查看了里面的内容。`
+        verb,
+        message: `你打开了${target.name}。`
       };
     }
 
-    // enter: 进入出口
+    // enter — 进入出口
     if (verb === 'enter') {
       return {
         success: true,
-        code: ActionResultCode.OK,
+        code: 'OK',
         targetId: target.id,
-        verb: verb,
+        verb,
         message: `你朝${target.name}走去，准备离开这个房间。`
       };
     }
 
-    // approach: 靠近（当前版本不自动移动）
+    // push — 推
+    if (verb === 'push') {
+      return {
+        success: true,
+        code: 'OK',
+        targetId: target.id,
+        verb,
+        message: `你用力推了推${target.name}，但它纹丝不动。`
+      };
+    }
+
+    // approach — 靠近（当前版本不支持自动移动）
     if (verb === 'approach') {
       return {
         success: false,
-        code: ActionResultCode.OUT_OF_RANGE,
+        code: 'OUT_OF_RANGE',
         targetId: target.id,
-        verb: verb,
-        message: `请使用移动模式靠近${target.name}。`,
+        verb,
+        message: `目标就在前方，但当前版本还不支持自动靠近，请手动移动过去。`,
         uiHint: {
           highlightTargetId: target.id,
           suggestedAction: '先移动靠近目标'
@@ -491,126 +503,119 @@ const RoomInteraction = (() => {
       };
     }
 
-    // push: 推
-    if (verb === 'push') {
-      return {
-        success: true,
-        code: ActionResultCode.OK,
-        targetId: target.id,
-        verb: verb,
-        message: `你用力推了推${target.name}，但它纹丝不动。`
-      };
-    }
-
-    // 兜底
+    // 未知动作
     return {
       success: false,
-      code: ActionResultCode.UNKNOWN,
+      code: 'UNKNOWN',
       targetId: target.id,
-      verb: verb,
+      verb,
       message: '你试着这么做了，但暂时没有发生什么。'
     };
   }
 
-  // ========== 11. 调查检定 ==========
-
-  function performInspect(target, ref, room) {
-    // CoC技能检定
-    let skillName = '侦查';
-    const skillMap = {
-      bookshelf: '图书馆使用', desk: '图书馆使用', table: '侦查',
-      chest: '锁匠', crate: '侦查', barrel: '侦查',
-      altar: '神秘学', statue: '神秘学', mirror: '侦查',
-      painting: '艺术', wardrobe: '侦查', bed: '侦查',
-      skeleton: '医学', rug: '侦查', fireplace: '侦查',
-      lamp: '侦查', candle: '侦查', door: '侦查'
+  // ========== 8. 调查成功文案生成 ==========
+  function getInspectSuccessText(target, ref) {
+    const typeTexts = {
+      table: '你在桌面上发现了值得注意的痕迹...',
+      desk: '你俯身查看书桌，发现了一些被频繁使用的迹象。',
+      bookshelf: '你扫过书架上的书脊，有几本引起了你的注意...',
+      chest: '你仔细检查了宝箱的锁扣，似乎可以打开。',
+      crate: '你翻检了木箱里的杂物，找到了一些有用的东西。',
+      barrel: '你检查了桶里的内容物...',
+      altar: '祭坛上刻着奇异的符文，散发着一股不祥的气息。',
+      statue: '雕像的细节令人不安，似乎在注视着你。',
+      mirror: '镜面映出你的身影，但似乎有什么不对劲...',
+      painting: '画中的场景令你感到一阵寒意。',
+      wardrobe: '衣柜里挂着几件旧衣服，你仔细翻找了一番。',
+      bed: '你检查了床铺，在枕头下发现了什么...',
+      skeleton: '骸骨的姿态暗示着死前经历了极大的恐惧。',
+      rug: '你掀开地毯，发现下面有些异样。',
+      fireplace: '壁炉中残留着灰烬，似乎不久前还有人使用过。',
+      lamp: '这盏灯看起来还能使用。',
+      candle: '蜡烛还剩不少，可以点燃。',
+      door: '你仔细检查了门，没有发现陷阱。'
     };
-    skillName = skillMap[target.objType] || '侦查';
+    return typeTexts[ref?.type] || `你在${target.name}上发现了值得注意的痕迹...`;
+  }
 
-    let checkResult = null;
-    let skillValue = 25;
-    if (typeof CoCRules !== 'undefined') {
-      const player = (typeof GameState !== 'undefined') ? GameState.getPlayer() : null;
-      if (player && player.skills && player.skills[skillName] !== undefined) {
-        skillValue = player.skills[skillName];
-      } else if (player && player.stats && typeof CoCRules.calcSkillBase === 'function') {
-        skillValue = CoCRules.calcSkillBase(skillName, player.stats);
-      }
-      if (typeof CoCRules.rollCheck === 'function') {
-        checkResult = CoCRules.rollCheck(skillValue);
-      }
+  // ========== 9. 超距反馈模板 ==========
+  function buildOutOfRangeMessage(target, parsed) {
+    const name = target.name;
+    switch (parsed.verb) {
+      case 'turn_on':
+        return `你看见${name}了，但它离你还有几步，暂时够不着。先移动到附近再尝试操作。`;
+      case 'ignite':
+        return `你看向${name}，但你现在还没走到它旁边。先靠近它，再尝试生火。`;
+      case 'turn_off':
+      case 'extinguish':
+        return `你看见${name}还亮着，但离得太远够不着。先靠近一些。`;
+      case 'inspect':
+        return `你能看见${name}，但离得还不够近，暂时没法仔细调查。`;
+      case 'search':
+        return `你能看见${name}，但离得太远，没法搜索。先靠近一些。`;
+      case 'open':
+        return `${name}就在那边，但你还没走到跟前。先靠近它。`;
+      case 'enter':
+        return `出口就在那边，但你还没走到门口。`;
+      case 'approach':
+        return `目标就在前方，但当前版本还不支持自动靠近，请手动移动过去。`;
+      default:
+        return `你看见${name}了，但现在距离还不够近。先靠近一些再试试。`;
     }
+  }
 
-    let message = '';
-    if (checkResult) {
-      message = `[${skillName}检定: ${checkResult.roll}/${skillValue} → ${checkResult.result}] `;
-      if (checkResult.isSuccess) {
-        const discoveries = [
-          `你在${target.name}上发现了值得注意的痕迹...`,
-          `仔细检查${target.name}后，你找到了一些线索。`,
-          `${target.name}中隐藏着不为人知的秘密...`,
-          `你对${target.name}的检查有了收获！`
-        ];
-        message += discoveries[Math.floor(Math.random() * discoveries.length)];
-      } else {
-        message += `你仔细检查了${target.name}，但没有发现什么特别的东西。`;
-      }
+  // ========== 10. 场景描述函数 ==========
+  function describeRoom(room) {
+    const visible = room.objects.filter(o => o.visible);
+
+    // 按类型分组
+    const lights = visible.filter(o => o._ref?.isLight);
+    const doors = visible.filter(o => o.type === 'door' || o._ref?.type === 'door');
+    const furniture = visible.filter(o => !o._ref?.isLight && o._ref?.type !== 'door');
+    const litLights = lights.filter(o => o._ref?.isOn);
+
+    const parts = [];
+
+    // 房间基本描述
+    parts.push(`你身处${room.roomName}。`);
+
+    // 光照状况
+    if (litLights.length > 0) {
+      parts.push('房间里有微弱的光源。');
     } else {
-      // 无CoCRules时降级
-      message = `你仔细调查了${target.name}。`;
+      parts.push('四周一片昏暗。');
     }
 
-    return {
-      success: true,
-      code: ActionResultCode.OK,
-      targetId: target.id,
-      verb: 'inspect',
-      message: message
-    };
+    // 可见物件
+    if (furniture.length > 0) {
+      const names = furniture.slice(0, 5).map(o => o.name);
+      if (furniture.length <= 3) {
+        parts.push(`你能看见${names.join('、')}。`);
+      } else {
+        parts.push(`你能看见${names.slice(0, 3).join('、')}等物件。`);
+      }
+    }
+
+    // 灯光物件
+    const unlitLights = lights.filter(o => !o._ref?.isOn);
+    if (unlitLights.length > 0) {
+      const lightNames = unlitLights.map(o => o.name);
+      parts.push(`${lightNames.join('、')}还没有点亮。`);
+    }
+
+    // 出口
+    if (doors.length > 0) {
+      parts.push('房间里有门。');
+    }
+
+    return parts.join('');
   }
 
-  // ========== 12. 反馈文本模板 ==========
-
-  function buildTurnOnMessage(target) {
-    const templates = {
-      lamp: '你伸手拧亮了灯，光芒驱散了周围的黑暗。',
-      candle: '你点燃了蜡烛，微弱的烛光摇曳着亮了起来。',
-      fireplace: '你点燃了壁炉，火焰很快蔓延开来，温暖的光照亮了周围。'
-    };
-    return templates[target.objType] || '你打开了照明，光芒驱散了黑暗。';
-  }
-
-  function buildTurnOffMessage(target) {
-    const templates = {
-      lamp: '你关掉了灯，黑暗重新笼罩。',
-      candle: '你吹灭了蜡烛，黑暗重新涌来。',
-      fireplace: '你熄灭了壁炉，房间重新陷入黑暗。'
-    };
-    return templates[target.objType] || '你关掉了光源，黑暗重新笼罩。';
-  }
-
-  function buildIgniteMessage(target) {
-    const templates = {
-      fireplace: '你蹲下身尝试点燃壁炉。火焰很快在可燃物上蔓延开来，温暖的光照亮了周围。',
-      candle: '你划亮火柴点燃了蜡烛，微弱的火光跳动着亮了起来。'
-    };
-    return templates[target.objType] || '你成功点燃了它，光芒驱散了部分黑暗。';
-  }
-
-  function buildExtinguishMessage(target) {
-    const templates = {
-      fireplace: '你用旁边的工具熄灭了壁炉的火焰，房间重新陷入黑暗和寒冷。',
-      candle: '你轻轻吹灭了蜡烛，黑暗重新涌来。'
-    };
-    return templates[target.objType] || '你熄灭了光源，黑暗重新笼罩。';
-  }
-
-  // ========== 13. 主执行器 ==========
-
+  // ========== 11. 主执行器 ==========
   /**
-   * 统一执行器 — 所有交互入口必须走这里
+   * 统一交互执行器 — 所有交互入口必须调用此函数
    * @param {string} text - 玩家输入文本
-   * @param {Object} room - RoomState快照
+   * @param {Object} room - RoomState（由buildRoomState构建）
    * @returns {Object} ActionResult
    */
   function executePlayerInput(text, room) {
@@ -618,170 +623,222 @@ const RoomInteraction = (() => {
 
     const parsed = parseAction(text, room);
 
-    // describe: 观察环境
-    if (parsed.intent === InputIntent.DESCRIBE) {
+    // describe — 观察环境
+    if (parsed.intent === 'describe') {
       return {
         success: true,
-        code: ActionResultCode.OK,
+        code: 'OK',
         message: describeRoom(room)
       };
     }
 
-    // flavor: 情绪氛围
-    if (parsed.intent === InputIntent.FLAVOR) {
-      const flavorMsgs = [
-        '你压低呼吸，谨慎地观察着周围。',
-        '你感到一阵不安，但努力让自己镇定下来。',
-        '你屏住呼吸，竖起耳朵仔细聆听。',
-        '黑暗中似乎有什么在注视着你，你下意识地握紧了拳头。'
-      ];
+    // flavor — 情绪输入
+    if (parsed.intent === 'flavor') {
       return {
         success: true,
-        code: ActionResultCode.OK,
-        message: flavorMsgs[Math.floor(Math.random() * flavorMsgs.length)]
+        code: 'OK',
+        message: getFlavorResponse(text)
       };
     }
 
-    // move: 纯移动意图
-    if (parsed.intent === InputIntent.MOVE) {
-      return {
-        success: true,
-        code: ActionResultCode.OK,
-        message: '请使用移动模式（按M或点击🚶按钮）靠近目标位置。'
-      };
-    }
-
-    // 交互类无目标
-    if ((parsed.intent === InputIntent.INTERACT || parsed.intent === InputIntent.COMPOSITE) && !parsed.targetId) {
-      return {
-        success: false,
-        code: ActionResultCode.TARGET_NOT_FOUND,
-        message: '你环顾四周，没有发现符合这个描述的目标。'
-      };
-    }
-
-    // 歧义目标
-    if (parsed.target && parsed.target.ambiguous) {
-      const names = parsed.target.candidates.map(o => o.name).join('、');
-      return {
-        success: false,
-        code: ActionResultCode.AMBIGUOUS_TARGET,
-        message: `这里有多个可能的目标（${names}），请更具体地说明你想操作哪一个。`
-      };
-    }
-
-    const target = room.objects.find(o => o.id === parsed.targetId);
-    if (!target) {
-      return {
-        success: false,
-        code: ActionResultCode.TARGET_NOT_FOUND,
-        message: '你环顾四周，没有发现符合这个描述的目标。'
-      };
-    }
-
-    // 可见性判定
-    if (!target.visible || !target.discovered) {
-      return {
-        success: false,
-        code: ActionResultCode.TARGET_NOT_VISIBLE,
-        targetId: target.id,
-        verb: parsed.verb,
-        message: '你暂时还没有注意到这个目标。',
-        uiHint: { highlightTargetId: target.id }
-      };
-    }
-
-    // 不可交互
-    if (!target.interactable) {
-      return {
-        success: false,
-        code: ActionResultCode.ACTION_NOT_ALLOWED,
-        targetId: target.id,
-        verb: parsed.verb,
-        message: `你能看见${target.name}，但它现在无法操作。`,
-        uiHint: { highlightTargetId: target.id }
-      };
-    }
-
-    // 动作合法性判定
-    if (parsed.verb && !target.availableActions.includes(parsed.verb)) {
-      return {
-        success: false,
-        code: ActionResultCode.ACTION_NOT_ALLOWED,
-        targetId: target.id,
-        verb: parsed.verb,
-        message: `你能看见${target.name}，但它并不能这样操作。`,
-        uiHint: { highlightTargetId: target.id }
-      };
-    }
-
-    // 距离判定（composite和interact都要检查）
-    const inRange = isInRange(room.playerPosition, target);
-    if (!inRange) {
-      return {
-        success: false,
-        code: ActionResultCode.OUT_OF_RANGE,
-        targetId: target.id,
-        verb: parsed.verb,
-        message: buildOutOfRangeMessage(target, parsed),
-        uiHint: {
-          highlightTargetId: target.id,
-          suggestedAction: '先移动靠近目标'
+    // move — 纯移动
+    if (parsed.intent === 'move') {
+      // 如果有目标，提示用移动模式靠近
+      if (parsed.targetId) {
+        const target = room.objects.find(o => o.id === parsed.targetId);
+        if (target) {
+          return {
+            success: true,
+            code: 'OK',
+            message: `请使用移动模式（点击🚶按钮或按M键）靠近${target.name}。`,
+            uiHint: { highlightTargetId: target.id }
+          };
         }
-      };
-    }
-
-    // AP判定（inspect/interact消耗AP，describe/flavor不消耗）
-    // 注意：AP扣除由game.js负责，这里只做检查
-    if (parsed.verb && parsed.verb !== 'approach' && room.ap <= 0) {
+      }
       return {
-        success: false,
-        code: ActionResultCode.AP_NOT_ENOUGH,
-        targetId: target.id,
-        verb: parsed.verb,
-        message: '你知道该怎么做，但你现在行动点不足。',
-        uiHint: { highlightTargetId: target.id }
+        success: true,
+        code: 'OK',
+        message: '请使用移动模式移动。点击🚶按钮或按M键进入移动模式。'
       };
     }
 
-    // 执行动作
-    return performAction(target, parsed.verb, room);
+    // unknown — 无法识别
+    if (parsed.intent === 'unknown') {
+      // 尝试模糊匹配：看看输入是否包含任何对象别名
+      const fuzzyTarget = fuzzyMatchObject(text, room);
+      if (fuzzyTarget) {
+        // 有模糊匹配结果，当作interact处理
+        parsed.intent = 'interact';
+        parsed.targetId = fuzzyTarget.id;
+        parsed.verb = parsed.verb || 'inspect';
+      } else {
+        return null; // 返回null，让game.js走AI/DM引擎
+      }
+    }
+
+    // interact / composite — 交互类
+    if (parsed.intent === 'interact' || parsed.intent === 'composite') {
+      // 无目标
+      if (!parsed.targetId) {
+        return {
+          success: false,
+          code: 'TARGET_NOT_FOUND',
+          message: '你环顾四周，没有发现符合这个描述的目标。'
+        };
+      }
+
+      // 歧义目标
+      const targetLookup = room.objects.find(o => o.id === parsed.targetId);
+      if (!targetLookup) {
+        // 可能是歧义标记
+        return {
+          success: false,
+          code: 'TARGET_NOT_FOUND',
+          message: '你环顾四周，有多个目标符合描述，请更具体地指定。'
+        };
+      }
+
+      const target = targetLookup;
+
+      // 不可见/未发现
+      if (!target.visible || !target.discovered) {
+        return {
+          success: false,
+          code: 'TARGET_NOT_VISIBLE',
+          targetId: target.id,
+          verb: parsed.verb,
+          message: '你暂时还没有注意到这个目标。',
+          uiHint: { highlightTargetId: target.id }
+        };
+      }
+
+      // 不可交互
+      if (!target.interactable) {
+        return {
+          success: false,
+          code: 'ACTION_NOT_ALLOWED',
+          targetId: target.id,
+          verb: parsed.verb,
+          message: `你能看见${target.name}，但它现在无法操作。`,
+          uiHint: { highlightTargetId: target.id }
+        };
+      }
+
+      // 动作不合法
+      if (parsed.verb && !isActionAllowed(parsed.verb, target)) {
+        return {
+          success: false,
+          code: 'ACTION_NOT_ALLOWED',
+          targetId: target.id,
+          verb: parsed.verb,
+          message: `你能看见${target.name}，但它并不能这样操作。`,
+          uiHint: { highlightTargetId: target.id }
+        };
+      }
+
+      // 距离检查（composite意图也一样，当前版本不支持自动移动）
+      const inRange = isInRange(room.playerPosition, target);
+      if (!inRange) {
+        return {
+          success: false,
+          code: 'OUT_OF_RANGE',
+          targetId: target.id,
+          verb: parsed.verb,
+          message: buildOutOfRangeMessage(target, parsed),
+          uiHint: {
+            highlightTargetId: target.id,
+            suggestedAction: '先移动靠近目标'
+          }
+        };
+      }
+
+      // AP检查（inspect不在此处扣AP，由game.js统一处理）
+      if (room.ap <= 0 && parsed.verb !== 'inspect') {
+        return {
+          success: false,
+          code: 'AP_NOT_ENOUGH',
+          targetId: target.id,
+          verb: parsed.verb,
+          message: '你知道该怎么做，但你现在行动点不足。',
+          uiHint: { highlightTargetId: target.id }
+        };
+      }
+
+      // 执行动作
+      return performAction(target, parsed.verb, room);
+    }
+
+    // 兜底
+    return null;
   }
 
-  // ========== 14. UIAdapter — 热点文本生成 ==========
+  // ========== 12. 解析总函数 ==========
+  function parseAction(text, room) {
+    const intent = classifyInput(text);
+    const verb = parseVerb(text);
+    const targetResult = bindTarget(text, verb, room);
 
-  /**
-   * 根据对象支持的动作生成UI标签文本
-   */
-  function getActionLabel(obj) {
-    if (!obj) return '';
-    const actions = obj.availableActions || [];
-    if (actions.includes('turn_on') || actions.includes('ignite')) {
-      return obj.state.isOn ? '💡 关灯' : '💡 开灯';
+    let targetId = undefined;
+    if (targetResult) {
+      if (targetResult._ambiguous) {
+        // 歧义：暂取第一个，但标记歧义
+        targetId = targetResult.candidates[0]?.id;
+      } else {
+        targetId = targetResult.id;
+      }
     }
-    if (actions.includes('open')) {
-      return obj.state.isOpen ? '🚪 关门' : '🚪 打开';
-    }
-    if (actions.includes('inspect')) {
-      return `🔍 调查${obj.name}`;
-    }
-    return `🔍 查看`;
+
+    return {
+      intent,
+      verb,
+      targetId,
+      rawText: text
+    };
   }
 
-  // ========== 15. 导出 ==========
+  // ========== 13. 动作合法性检查 ==========
+  function isActionAllowed(verb, target) {
+    const actions = target.availableActions || [];
+    const mapped = mapVerbToActions(verb);
+    // 检查映射后的动作是否在对象的可用动作中
+    return mapped.some(a => actions.includes(a)) || actions.includes(verb);
+  }
 
+  // ========== 14. 模糊匹配 ==========
+  function fuzzyMatchObject(text, room) {
+    const candidates = room.objects.filter(o => o.visible && o.discovered);
+    // 检查输入文本是否部分匹配任何对象名
+    for (const obj of candidates) {
+      const names = [obj.name, ...(obj.aliases || [])];
+      for (const name of names) {
+        if (name && (text.includes(name) || name.includes(text))) {
+          return obj;
+        }
+      }
+    }
+    return null;
+  }
+
+  // ========== 15. 情绪响应 ==========
+  function getFlavorResponse(text) {
+    if (/阴森|恐怖|可怕/.test(text)) return '你感到一阵寒意从脊背升起，这里的氛围确实令人不安。';
+    if (/害怕|恐惧|发抖/.test(text)) return '你压低呼吸，努力控制住自己的恐惧。';
+    if (/紧张|不安/.test(text)) return '你绷紧了神经，谨慎地观察着周围的一切。';
+    if (/小心/.test(text)) return '你放轻脚步，更加小心地审视着环境。';
+    if (/冷/.test(text)) return '你感到一阵莫名的寒意，不由得裹紧了衣服。';
+    return '你压低呼吸，谨慎地观察着周围。';
+  }
+
+  // ========== 公开API ==========
   return {
     buildRoomState,
     executePlayerInput,
+    // 以下为测试/调试用
     classifyInput,
     parseVerb,
-    parseAction,
     bindTarget,
-    describeRoom,
-    getActionLabel,
-    // 常量导出（供测试用）
-    InputIntent,
-    ActionResultCode
+    parseAction,
+    describeRoom
   };
 
 })();
