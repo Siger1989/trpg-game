@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+<title>暗夜跑团 - AI TRPG</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- 主菜单 -->
+  <div id="screen-menu" class="screen active">
+    <div class="menu-bg"></div>
+    <div class="menu-content">
+      <h1 class="game-title">暗夜跑团</h1>
+      <p class="game-subtitle">AI TRPG · 克苏鲁的呼唤</p>
+      <div class="menu-buttons">
+        <button class="btn btn-primary" id="btn-new-game">开始新冒险</button>
+        <button class="btn btn-secondary" id="btn-continue" style="display:none">继续冒险</button>
+        <button class="btn btn-ghost" id="btn-about">关于</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 角色创建 -->
+  <div id="screen-char-create" class="screen">
+    <div class="char-create-layout">
+      <!-- 左侧：纸娃娃预览 -->
+      <div class="char-preview-panel">
+        <canvas id="paperdoll-canvas" width="300" height="400"></canvas>
+        <div class="char-name-input">
+          <input type="text" id="char-name" placeholder="输入角色名..." maxlength="20">
+        </div>
+      </div>
+      <!-- 右侧：属性和选择 -->
+      <div class="char-config-panel">
+        <div class="config-section">
+          <h3>外观</h3>
+          <div class="appearance-row">
+            <label>发型</label>
+            <div class="selector-group">
+              <button class="sel-btn" data-part="hair" data-dir="-1">◀</button>
+              <span id="hair-label">短发</span>
+              <button class="sel-btn" data-part="hair" data-dir="1">▶</button>
+            </div>
+          </div>
+          <div class="appearance-row">
+            <label>脸型</label>
+            <div class="selector-group">
+              <button class="sel-btn" data-part="face" data-dir="-1">◀</button>
+              <span id="face-label">圆脸</span>
+              <button class="sel-btn" data-part="face" data-dir="1">▶</button>
+            </div>
+          </div>
+          <div class="appearance-row">
+            <label>表情</label>
+            <div class="selector-group">
+              <button class="sel-btn" data-part="expr" data-dir="-1">◀</button>
+              <span id="expr-label">平静</span>
+              <button class="sel-btn" data-part="expr" data-dir="1">▶</button>
+            </div>
+          </div>
+          <div class="appearance-row">
+            <label>服装</label>
+            <div class="selector-group">
+              <button class="sel-btn" data-part="outfit" data-dir="-1">◀</button>
+              <span id="outfit-label">风衣</span>
+              <button class="sel-btn" data-part="outfit" data-dir="1">▶</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <h3>属性 <button class="btn-reroll" id="btn-reroll">🎲 重投</button></h3>
+          <div class="attr-grid" id="attr-grid">
+            <!-- JS动态填充 -->
+          </div>
+        </div>
+
+        <div class="config-section">
+          <h3>职业</h3>
+          <div class="occupation-list" id="occupation-list">
+            <!-- JS动态填充 -->
+          </div>
+        </div>
+
+        <div class="config-section">
+          <h3>背景故事</h3>
+          <textarea id="char-background" placeholder="描述你的角色背景（可选）..." rows="3"></textarea>
+        </div>
+
+        <div class="char-actions">
+          <button class="btn btn-ghost" id="btn-back-menu">返回</button>
+          <button class="btn btn-primary" id="btn-confirm-char">确认角色</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 游戏主界面 -->
+  <div id="screen-game" class="screen">
+    <!-- 3D场景容器 -->
+    <div id="scene-container"></div>
+    
+    <!-- HUD覆盖层 -->
+    <div id="game-hud">
+      <!-- 角色状态栏 -->
+      <div class="hud-top">
+        <div class="char-status">
+          <canvas id="hud-portrait" width="48" height="48"></canvas>
+          <div class="status-bars">
+            <div class="bar hp-bar"><div class="bar-fill" id="hp-fill"></div><span id="hp-text">10/10</span></div>
+            <div class="bar san-bar"><div class="bar-fill" id="san-fill"></div><span id="san-text">70/70</span></div>
+            <div class="bar mp-bar"><div class="bar-fill" id="mp-fill"></div><span id="mp-text">10/10</span></div>
+          </div>
+        </div>
+        <div class="hud-location" id="hud-location">未知地点</div>
+      </div>
+
+      <!-- 中间3D场景可见区域 -->
+      <div class="hud-middle"></div>
+
+      <!-- 快捷行动 -->
+      <div class="hud-actions" id="quick-actions">
+        <!-- JS动态填充，由DMEngine.getChoices()驱动 -->
+      </div>
+
+      <!-- 叙事面板 -->
+      <div class="hud-narrative" id="narrative-panel">
+        <div class="narrative-resize-handle" id="narrative-resize-handle"></div>
+        <div class="narrative-text" id="narrative-text">
+          <p class="dm-narration">欢迎来到暗夜跑团，冒险即将开始...</p>
+        </div>
+        <div class="narrative-input">
+          <input type="text" id="player-input" placeholder="输入你的行动..." autocomplete="off">
+          <button class="btn-send" id="btn-send">▶</button>
+          <button class="btn-dice" id="btn-dice" title="投骰">🎲</button>
+        </div>
+      </div>
+
+      <!-- 移动端摇杆区域 -->
+      <div class="mobile-controls" id="mobile-controls">
+        <div class="joystick-zone" id="joystick-move"></div>
+      </div>
+    </div>
+
+    <!-- 战斗界面覆盖 -->
+    <div id="combat-overlay" class="overlay" style="display:none">
+      <div class="combat-hud">
+        <div class="combat-initiative" id="combat-initiative">
+          <!-- 先攻顺序 -->
+        </div>
+        <div class="combat-log" id="combat-log"></div>
+        <div class="combat-actions" id="combat-actions">
+          <!-- 战斗行动按钮 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 骰子面板 -->
+    <div id="dice-panel" class="overlay" style="display:none">
+      <div class="dice-container">
+        <div class="dice-result" id="dice-result">
+          <div class="dice-number" id="dice-number">--</div>
+          <div class="dice-detail" id="dice-detail"></div>
+        </div>
+        <div class="dice-buttons">
+          <button class="dice-btn" data-sides="100">d100</button>
+          <button class="dice-btn" data-sides="20">d20</button>
+          <button class="dice-btn" data-sides="10">d10</button>
+          <button class="dice-btn" data-sides="6">d6</button>
+          <button class="dice-btn" data-sides="4">d4</button>
+        </div>
+        <button class="btn btn-ghost" id="dice-close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 关于页面 -->
+  <div id="screen-about" class="screen">
+    <div class="about-content">
+      <h2>暗夜跑团</h2>
+      <p>一款基于Web的AI驱动TRPG游戏</p>
+      <p>规则系统：克苏鲁的呼唤 第七版</p>
+      <p>3D场景 · 回合制战斗 · AI主持人</p>
+      <hr>
+      <p class="small">Powered by Three.js · 纯前端 · GitHub Pages</p>
+      <button class="btn btn-ghost" id="btn-about-back">返回</button>
+    </div>
+  </div>
+
+  <!-- 剧本共创问卷 -->
+  <div id="screen-scenario-survey" class="screen">
+    <div class="survey-container">
+      <h2 class="survey-title">剧本共创</h2>
+      <p class="survey-subtitle">回答几个问题，AI将为你定制专属剧本</p>
+
+      <!-- 进度指示 -->
+      <div class="survey-progress">
+        <div class="progress-step active" data-step="0">1. 氛围</div>
+        <div class="progress-step" data-step="1">2. 角色</div>
+        <div class="progress-step" data-step="2">3. 期待</div>
+      </div>
+
+      <!-- 第一轮：情绪层 -->
+      <div class="survey-step active" id="survey-step-1" data-step="0">
+        <h3>你想要什么样的氛围？</h3>
+        <div class="survey-options" id="mood-options">
+          <button class="survey-opt-btn" data-value="gothic">🏚️ 哥特阴森 — 古堡、迷雾、维多利亚时代的恐惧</button>
+          <button class="survey-opt-btn" data-value="cosmic">🌌 宇宙恐怖 — 不可名状的深渊、星辰与虚无</button>
+          <button class="survey-opt-btn" data-value="noir">🔍 黑色侦探 — 阴暗街巷、阴谋、1930年代</button>
+          <button class="survey-opt-btn" data-value="folklore">👹 民间传说 — 乡村怪谈、古老仪式、禁忌</button>
+          <button class="survey-opt-btn" data-value="modern">📱 现代都市 — 都市传说、网络怪谈、日常崩坏</button>
+          <button class="survey-opt-btn" data-value="dream">🌀 梦境迷离 — 超现实、意识流、逻辑扭曲</button>
+        </div>
+      </div>
+
+      <!-- 第二轮：代入层 -->
+      <div class="survey-step" id="survey-step-2" data-step="1">
+        <h3>你更想扮演什么样的角色？</h3>
+        <div class="survey-options" id="role-options">
+          <button class="survey-opt-btn" data-value="scholar">📚 学者 — 追求知识的冒险者</button>
+          <button class="survey-opt-btn" data-value="detective">🕵️ 侦探 — 揭露真相的调查者</button>
+          <button class="survey-opt-btn" data-value="outsider">🚶 局外人 — 被卷入事件的普通人</button>
+          <button class="survey-opt-btn" data-value="mystic">🔮 神秘学者 — 接触禁忌知识的探索者</button>
+          <button class="survey-opt-btn" data-value="protector">🛡️ 守护者 — 保护他人的战士</button>
+          <button class="survey-opt-btn" data-value="wanderer">🗺️ 漂泊者 — 无根的旅人</button>
+        </div>
+      </div>
+
+      <!-- 第三轮：开放层 -->
+      <div class="survey-step" id="survey-step-3" data-step="2">
+        <h3>你最期待什么？</h3>
+        <div class="survey-options" id="expect-options">
+          <button class="survey-opt-btn" data-value="mystery">🧩 解谜 — 复杂的谜题和线索</button>
+          <button class="survey-opt-btn" data-value="combat">⚔️ 战斗 — 与怪物的激烈对抗</button>
+          <button class="survey-opt-btn" data-value="horror">😱 恐惧 — 令人毛骨悚然的氛围</button>
+          <button class="survey-opt-btn" data-value="story">📖 故事 — 深度的剧情和角色发展</button>
+          <button class="survey-opt-btn" data-value="explore">🗺️ 探索 — 发现隐藏的地点和秘密</button>
+          <button class="survey-opt-btn" data-value="social">🎭 社交 — 与NPC的互动和交涉</button>
+        </div>
+      </div>
+
+      <!-- 问卷结果预览 -->
+      <div class="survey-step" id="survey-step-result" data-step="3">
+        <h3>你的剧本</h3>
+        <div class="scenario-preview" id="scenario-preview" style="display:none">
+          <!-- JS动态填充 -->
+        </div>
+        <div class="survey-actions" style="margin-top:20px;display:flex;gap:12px;justify-content:center;">
+          <button class="btn btn-primary" id="btn-survey-start">🎭 开始冒险</button>
+          <button class="btn btn-ghost" id="btn-survey-redo">🔄 重新选择</button>
+        </div>
+      </div>
+
+      <div class="survey-nav">
+        <button class="btn btn-ghost" id="survey-prev" style="display:none">← 上一步</button>
+        <button class="btn btn-ghost" id="survey-skip">跳过，使用默认剧本</button>
+        <button class="btn btn-secondary" id="survey-next">下一步 →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 加载Three.js（本地文件，避免CDN被浏览器跟踪防护拦截） -->
+  <script src="js/three.min.js"></script>
+  <!-- 相机控制器 -->
+  <script src="js/camera-controls.js"></script>
+  <!-- 游戏模块 -->
+  <script src="js/paperdoll.js"></script>
+  <script src="js/coc-rules.js"></script>
+  <!-- 架构模块（方案A/B/C） -->
+  <script src="js/scene-compiler.js"></script>
+  <script src="js/input-interpreter.js"></script>
+  <script src="js/action-resolver.js"></script>
+  <!-- 场景感知与动作队列（方案D） -->
+  <script src="js/scene-perception.js"></script>
+  <script src="js/action-queue.js"></script>
+  <!-- 场景与交互 -->
+  <script src="js/scene-manager.js"></script>
+  <script src="js/room-interaction.js"></script>
+  <script src="js/combat.js"></script>
+  <script src="js/fog-of-war.js"></script>
+  <script src="js/ai-dm.js"></script>
+  <script src="js/dm-engine.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
