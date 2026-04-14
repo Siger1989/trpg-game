@@ -99,8 +99,19 @@
   <!-- 游戏主界面 -->
   <div id="screen-game" class="screen">
     <!-- 3D场景容器 -->
-    <div id="scene-container"></div>
-    
+    <div id="scene-container">
+      <!-- 移动端方向键（浮动在3D场景上） -->
+      <div class="mobile-controls" id="mobile-controls">
+        <div class="dpad" id="dpad">
+          <button class="dpad-btn dpad-up" data-dx="0" data-dz="-1">▲</button>
+          <button class="dpad-btn dpad-left" data-dx="-1" data-dz="0">◀</button>
+          <button class="dpad-btn dpad-center" id="dpad-center">🚶</button>
+          <button class="dpad-btn dpad-right" data-dx="1" data-dz="0">▶</button>
+          <button class="dpad-btn dpad-down" data-dx="0" data-dz="1">▼</button>
+        </div>
+      </div>
+    </div>
+
     <!-- HUD覆盖层 -->
     <div id="game-hud">
       <!-- 角色状态栏 -->
@@ -115,9 +126,6 @@
         </div>
         <div class="hud-location" id="hud-location">未知地点</div>
       </div>
-
-      <!-- 中间3D场景可见区域 -->
-      <div class="hud-middle"></div>
 
       <!-- 快捷行动 -->
       <div class="hud-actions" id="quick-actions">
@@ -135,11 +143,6 @@
           <button class="btn-send" id="btn-send">▶</button>
           <button class="btn-dice" id="btn-dice" title="投骰">🎲</button>
         </div>
-      </div>
-
-      <!-- 移动端摇杆区域 -->
-      <div class="mobile-controls" id="mobile-controls">
-        <div class="joystick-zone" id="joystick-move"></div>
       </div>
     </div>
 

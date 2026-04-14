@@ -234,12 +234,30 @@ document.addEventListener('DOMContentLoaded', () => {
   function startGame(isContinue) {
     UI.showScreen('game');
     if (!isContinue) DMEngine.initWorld('old_house');
-    requestAnimationFrame(() => { try { if (!sceneInitialized) { const c=document.getElementById('scene-container'); if(!c.clientWidth){setTimeout(()=>startGame(isContinue),100);return;} SceneManager.init(c); sceneInitialized=true; } finishStartGame(); } catch(e) { console.error(e); finishStartGame(); } });
+    requestAnimationFrame(() => {
+      try {
+        if (!sceneInitialized) {
+          const c = document.getElementById('scene-container');
+          if (!c || !c.clientWidth || !c.clientHeight) {
+            setTimeout(() => startGame(isContinue), 100);
+            return;
+          }
+          SceneManager.init(c);
+          sceneInitialized = true;
+        }
+        finishStartGame();
+      } catch(e) { console.error(e); finishStartGame(); }
+    });
   }
   function finishStartGame() {
     try { loadCurrentScene(); } catch(e) {}
     UI.updateHUD(); UI.addNarration(DMEngine.getNarration(), 'dm'); showChoices(DMEngine.getChoices());
     DMEngine.resetAP(); UI.updateHUD();
+    // 竖屏设备自动显示方向键
+    const mc = document.getElementById('mobile-controls');
+    if (mc && window.matchMedia('(max-width: 768px)').matches) {
+      mc.style.display = 'block';
+    }
     // 设置3D物件交互回调
     if (typeof SceneManager !== 'undefined' && SceneManager.setObjectInteractionHandler) {
       SceneManager.setObjectInteractionHandler((type, name, gx, gz) => {
@@ -513,17 +531,58 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 移动端摇杆
-  const joystickZone = document.getElementById('joystick-move');
-  if (joystickZone) {
-    let joystickActive = false, startX, startY;
-    joystickZone.addEventListener('touchstart', (e) => { e.preventDefault(); joystickActive=true; startX=e.touches[0].clientX; startY=e.touches[0].clientY; });
-    joystickZone.addEventListener('touchend', (e) => {
-      e.preventDefault(); if(!joystickActive) return; joystickActive=false;
-      const touch=e.changedTouches[0]; const dx=touch.clientX-startX; const dy=touch.clientY-startY; const threshold=20;
-      if(Math.abs(dx)>Math.abs(dy)){if(dx>threshold)SceneManager.movePlayer(1,0);else if(dx<-threshold)SceneManager.movePlayer(-1,0);}
-      else{if(dy>threshold)SceneManager.movePlayer(0,1);else if(dy<-threshold)SceneManager.movePlayer(0,-1);}
-      updateFog(); UI.updateHUD();
+  // 移动端方向键
+  document.querySelectorAll('.dpad-btn[data-dx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const dx = parseInt(btn.dataset.dx);
+      const dz = parseInt(btn.dataset.dz);
+      if (!moveMode) {
+        // 非移动模式：自动进入移动模式
+        enterMoveMode();
+      }
+      const moved = SceneManager.movePlayer(dx, dz);
+      if (moved) {
+        moveStepCount++;
+        if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); exitMoveMode(); return; }
+        const countEl = document.getElementById('move-step-count'); if (countEl) countEl.textContent = moveStepCount;
+        updateFog(); UI.updateHUD();
+      }
+    });
+    // 长按连续移动
+    let longPressTimer = null;
+    btn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const dx = parseInt(btn.dataset.dx);
+      const dz = parseInt(btn.dataset.dz);
+      if (!moveMode) enterMoveMode();
+      // 立即移动一步
+      const moved = SceneManager.movePlayer(dx, dz);
+      if (moved) {
+        moveStepCount++;
+        if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); exitMoveMode(); return; }
+        const countEl = document.getElementById('move-step-count'); if (countEl) countEl.textContent = moveStepCount;
+        updateFog(); UI.updateHUD();
+      }
+      // 长按连续移动
+      longPressTimer = setInterval(() => {
+        const m = SceneManager.movePlayer(dx, dz);
+        if (m) {
+          moveStepCount++;
+          if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); exitMoveMode(); clearInterval(longPressTimer); return; }
+          const countEl = document.getElementById('move-step-count'); if (countEl) countEl.textContent = moveStepCount;
+          updateFog(); UI.updateHUD();
+        }
+      }, 250);
+    }, { passive: false });
+    btn.addEventListener('touchend', () => { if (longPressTimer) { clearInterval(longPressTimer); longPressTimer = null; } });
+    btn.addEventListener('touchcancel', () => { if (longPressTimer) { clearInterval(longPressTimer); longPressTimer = null; } });
+  });
+
+  // 方向键中心按钮：切换移动模式
+  const dpadCenter = document.getElementById('dpad-center');
+  if (dpadCenter) {
+    dpadCenter.addEventListener('click', () => {
+      toggleMoveMode();
     });
   }
 

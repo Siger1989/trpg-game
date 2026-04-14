@@ -329,6 +329,7 @@ html, body {
   position: absolute;
   inset: 0;
   z-index: 1;
+  overflow: hidden;
 }
 
 #game-hud {
@@ -597,22 +598,65 @@ html, body {
   background: var(--accent-glow);
 }
 
-/* 移动端摇杆 */
+/* 移动端方向键 */
 .mobile-controls {
   position: absolute;
-  bottom: 200px;
-  left: 20px;
-  width: 120px;
-  height: 120px;
+  bottom: 160px;
+  left: 16px;
   display: none;
+  z-index: 20;
 }
 
-.joystick-zone {
-  width: 100%;
-  height: 100%;
-  background: rgba(255,255,255,0.05);
-  border: 2px solid rgba(255,255,255,0.1);
-  border-radius: 50%;
+.dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 40px);
+  grid-template-rows: repeat(3, 40px);
+  gap: 2px;
+}
+
+.dpad-btn {
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(201,160,78,0.4);
+  border-radius: 6px;
+  background: rgba(10,10,18,0.8);
+  color: var(--accent);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.dpad-btn:active {
+  background: rgba(201,160,78,0.3);
+  transform: scale(0.92);
+}
+
+.dpad-up { grid-column: 2; grid-row: 1; }
+.dpad-left { grid-column: 1; grid-row: 2; }
+.dpad-center { grid-column: 2; grid-row: 2; font-size: 14px; }
+.dpad-right { grid-column: 3; grid-row: 2; }
+.dpad-down { grid-column: 2; grid-row: 3; }
+
+/* 竖屏时方向键位置调整 */
+@media (max-width: 768px) and (orientation: portrait) {
+  .mobile-controls {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    z-index: 20;
+  }
+  .dpad {
+    grid-template-columns: repeat(3, 44px);
+    grid-template-rows: repeat(3, 44px);
+  }
+  .dpad-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
 }
 
 /* ========== 战斗覆盖 ========== */
@@ -958,9 +1002,158 @@ html, body {
   #paperdoll-canvas { width: 200px; height: 267px; }
   .attr-grid { grid-template-columns: repeat(2, 1fr); }
   .occupation-list { grid-template-columns: repeat(2, 1fr); }
-  .mobile-controls { display: block; }
-  .hud-actions { display: none; }
   .game-title { font-size: 2em; }
+}
+
+/* ========== 手机竖屏适配 ========== */
+@media (max-width: 768px) and (orientation: portrait) {
+  /* 游戏主界面竖屏布局：3D场景在上，叙事在下 */
+  #screen-game {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* 3D场景容器：竖屏时占上半部分 */
+  #scene-container {
+    position: relative !important;
+    inset: auto !important;
+    width: 100%;
+    height: 45vh;
+    min-height: 200px;
+    flex-shrink: 0;
+  }
+
+  /* HUD覆盖层改为流式布局 */
+  #game-hud {
+    position: relative !important;
+    inset: auto !important;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    pointer-events: auto;
+    min-height: 0;
+  }
+  #game-hud > * { pointer-events: auto; }
+
+  /* 顶部状态栏：紧凑化 */
+  .hud-top {
+    padding: 6px 10px;
+    background: rgba(0,0,0,0.85);
+    flex-shrink: 0;
+  }
+  .char-status { gap: 6px; }
+  #hud-portrait { width: 36px; height: 36px; }
+  .bar { width: 80px; height: 12px; }
+  .hud-location { font-size: 0.8em; padding: 3px 8px; }
+
+  /* 中间区域：竖屏不需要 */
+  .hud-middle { display: none; }
+
+  /* 快捷行动栏：横向滚动，紧凑 */
+  .hud-actions {
+    padding: 6px 10px;
+    gap: 4px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-shrink: 0;
+  }
+  .action-btn {
+    padding: 6px 10px;
+    font-size: 0.8em;
+    flex-shrink: 0;
+  }
+  .ap-display { font-size: 0.8em; padding: 4px 8px; }
+
+  /* 叙事面板：占下半部分 */
+  .hud-narrative {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    padding: 0 10px 8px 10px;
+    border-top: 1px solid var(--border);
+    resize: none;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .narrative-resize-handle { display: none; }
+  .narrative-text {
+    flex: 1;
+    min-height: 40px;
+    max-height: none;
+    font-size: 0.9em;
+    line-height: 1.5;
+    -webkit-overflow-scrolling: touch;
+  }
+  .narrative-input {
+    gap: 6px;
+    flex-shrink: 0;
+    padding-top: 6px;
+  }
+  .narrative-input input {
+    padding: 8px 10px;
+    font-size: 16px; /* 防止iOS自动缩放 */
+  }
+  .btn-send, .btn-dice {
+    padding: 8px 12px;
+    font-size: 1em;
+    flex-shrink: 0;
+  }
+
+  /* 移动端方向键：浮动在3D场景左下角 */
+  .mobile-controls {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    z-index: 20;
+  }
+  .dpad {
+    grid-template-columns: repeat(3, 44px);
+    grid-template-rows: repeat(3, 44px);
+  }
+  .dpad-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+
+  /* 移动提示条适配 */
+  .move-hint-bar {
+    padding: 6px 10px;
+    font-size: 0.85em;
+  }
+
+  /* 战斗覆盖层适配 */
+  .combat-hud {
+    width: 95%;
+    max-height: 85vh;
+    padding: 14px;
+  }
+
+  /* 骰子面板适配 */
+  .dice-container {
+    min-width: 200px;
+    padding: 16px;
+  }
+  .dice-number { font-size: 3em; }
+
+  /* 问卷页面适配 */
+  .survey-container { padding: 0 12px; }
+  .survey-title { font-size: 1.4em; }
+  .survey-opt-btn { padding: 10px 14px; font-size: 0.9em; }
+
+  /* 角色创建适配 */
+  #paperdoll-canvas { width: 180px; height: 240px; }
+}
+
+/* ========== 横屏手机/小平板 ========== */
+@media (max-width: 900px) and (orientation: landscape) {
+  .hud-top { padding: 4px 10px; }
+  .bar { width: 90px; height: 12px; }
+  .hud-narrative { max-height: 35vh; min-height: 80px; }
+  .narrative-input input { font-size: 16px; }
+  .mobile-controls { display: block; bottom: 100px; left: 12px; width: 80px; height: 80px; }
 }
 
 /* ========== 动画 ========== */

@@ -121,6 +121,10 @@ const SceneManager = (() => {
     // 确保容器有尺寸
     const w = container.clientWidth || window.innerWidth;
     const h = container.clientHeight || window.innerHeight;
+    if (w === 0 || h === 0) {
+      console.warn('SceneManager: container has zero size, deferring init');
+      return;
+    }
 
     // 相机 - 斜45度等距视角
     camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
@@ -147,18 +151,30 @@ const SceneManager = (() => {
     window.addEventListener('resize', () => {
       const newW = container.clientWidth || window.innerWidth;
       const newH = container.clientHeight || window.innerHeight;
+      if (newW === 0 || newH === 0) return; // 容器不可见时跳过
       camera.aspect = newW / newH;
       camera.updateProjectionMatrix();
       renderer.setSize(newW, newH);
+      // 竖屏时调整相机视角：更陡的俯角以看清房间
+      if (controls) {
+        const isPortrait = newH > newW;
+        if (isPortrait) {
+          const maxDim = currentRoom ? Math.max(currentRoom.width || 5, currentRoom.height || 5) : 5;
+          const dist = Math.max(8, maxDim * 1.8);
+          controls.setSpherical(dist, Math.PI / 3, Math.PI / 4); // 更陡的俯角
+        }
+      }
     });
 
     // 环境光（极低基础照明，让灯光成为关键光源）
     const ambient = new THREE.AmbientLight(0x8888aa, 0.3);
     scene.add(ambient);
+    ambientLightBase = ambient; // 保存引用，开灯时动态调整
 
     // 半球光补充微弱环境（天空冷光+地面暗光）
     const hemiLight = new THREE.HemisphereLight(0x6666aa, 0x222233, 0.2);
     scene.add(hemiLight);
+    hemiLightBase = hemiLight; // 保存引用
 
     // 默认雾（暗色，营造氛围）
     scene.fog = new THREE.FogExp2(0x0a0a14, 0.02);
@@ -264,15 +280,18 @@ const SceneManager = (() => {
   function centerCameraOnRoom(w, h) {
     const centerX = 0; // 房间中心在世界原点
     const centerZ = 0;
-    // 根据房间大小调整相机距离
+    // 根据房间大小和屏幕方向调整相机距离
     const maxDim = Math.max(w || 5, h || 5);
-    const dist = Math.max(10, maxDim * 2.0);
+    const container = renderer?.domElement?.parentElement;
+    const isPortrait = container ? (container.clientHeight > container.clientWidth) : false;
+    const dist = isPortrait
+      ? Math.max(8, maxDim * 1.8)  // 竖屏：更近以看清
+      : Math.max(10, maxDim * 2.0);
+    const phi = isPortrait ? Math.PI / 3 : Math.PI / 4; // 竖屏更陡俯角
     if (controls) {
       controls.setTarget(centerX, 0, centerZ);
-      // 斜45度等距视角：phi=π/4(45°仰角), theta=π/4(斜后方)
-      controls.setSpherical(dist, Math.PI / 4, Math.PI / 4);
+      controls.setSpherical(dist, phi, Math.PI / 4);
     } else {
-      // 降级：手动计算45度等距位置
       const halfDist = dist * Math.SQRT1_2;
       camera.position.set(centerX + halfDist, halfDist, centerZ + halfDist);
       camera.lookAt(centerX, 0, centerZ);
@@ -437,20 +456,39 @@ const SceneManager = (() => {
       case 'lamp':
         mesh = createCylinder(0.1, 0.3, tpl.color);
         mesh.position.y = 1.5;
-        // 灯光源（初始关闭，需要开灯才亮）
-        const light = new THREE.PointLight(0xccaa44, 0, 10);
+        // 灯光源（初始关闭，需要开灯才亮）— 增强强度和范围
+        const light = new THREE.PointLight(0xffdd88, 0, 18);
         light.position.y = 1.8;
         light.name = 'objectLight';
+        light.castShadow = true;
+        light.shadow.mapSize.width = 256;
+        light.shadow.mapSize.height = 256;
         group.add(light);
+        // 灯罩发光球（开灯时显示）
+        const lampGlow = new THREE.Mesh(
+          new THREE.SphereGeometry(0.15, 8, 6),
+          new THREE.MeshBasicMaterial({ color: 0xffdd88, transparent: true, opacity: 0 })
+        );
+        lampGlow.position.y = 1.7;
+        lampGlow.name = 'glowMesh';
+        group.add(lampGlow);
         break;
       case 'candle':
         mesh = createCylinder(0.05, 0.25, 0xeebb55);
         mesh.position.y = 0.85;
-        // 蜡烛光源（初始关闭）
-        const candleLight = new THREE.PointLight(0xee9944, 0, 5);
+        // 蜡烛光源（初始关闭）— 增强范围
+        const candleLight = new THREE.PointLight(0xff9944, 0, 10);
         candleLight.position.y = 1.05;
         candleLight.name = 'objectLight';
         group.add(candleLight);
+        // 烛焰发光球
+        const candleGlow = new THREE.Mesh(
+          new THREE.SphereGeometry(0.06, 6, 4),
+          new THREE.MeshBasicMaterial({ color: 0xff9944, transparent: true, opacity: 0 })
+        );
+        candleGlow.position.y = 1.0;
+        candleGlow.name = 'glowMesh';
+        group.add(candleGlow);
         break;
       case 'statue':
         mesh = createCylinder(0.3, 1.8, tpl.color);
@@ -483,11 +521,22 @@ const SceneManager = (() => {
       case 'fireplace':
         mesh = createBox(1.4, 1.2, 0.5, tpl.color);
         mesh.position.y = 0.6;
-        // 壁炉光源（初始关闭）
-        const fireLight = new THREE.PointLight(0xff6622, 0, 12);
+        // 壁炉光源（初始关闭）— 大范围暖光
+        const fireLight = new THREE.PointLight(0xff6622, 0, 22);
         fireLight.position.y = 1.0;
         fireLight.name = 'objectLight';
+        fireLight.castShadow = true;
+        fireLight.shadow.mapSize.width = 256;
+        fireLight.shadow.mapSize.height = 256;
         group.add(fireLight);
+        // 火焰发光效果
+        const fireGlow = new THREE.Mesh(
+          new THREE.SphereGeometry(0.3, 6, 4),
+          new THREE.MeshBasicMaterial({ color: 0xff6622, transparent: true, opacity: 0 })
+        );
+        fireGlow.position.y = 0.9;
+        fireGlow.name = 'glowMesh';
+        group.add(fireGlow);
         break;
       case 'chest':
         mesh = createBox(0.9, 0.6, 0.6, tpl.color);
@@ -576,8 +625,11 @@ const SceneManager = (() => {
     if (objState.isLight && objState.isOn) {
       const lightMesh = group.children.find(c => c.isLight && c.name === 'objectLight');
       if (lightMesh) {
-        lightMesh.intensity = objState.type === 'lamp' ? 2.5 : objState.type === 'candle' ? 1.5 : objState.type === 'fireplace' ? 3.5 : 2.0;
+        lightMesh.intensity = objState.type === 'lamp' ? 5.0 : objState.type === 'candle' ? 3.0 : objState.type === 'fireplace' ? 7.0 : 4.0;
       }
+      // 显示发光球
+      const glowMesh = group.children.find(c => c.name === 'glowMesh');
+      if (glowMesh) glowMesh.material.opacity = 0.9;
     }
   }
 
@@ -722,7 +774,9 @@ const SceneManager = (() => {
 
   // ========== 场景联动方法（叙事→3D效果） ==========
   let mainLightRef = null;   // 主光源引用
-  let ambientLightRef = null; // 环境光引用
+  let ambientLightRef = null; // 环境光引用（applyAtmosphere创建的）
+  let ambientLightBase = null; // 基础环境光引用（init创建的）
+  let hemiLightBase = null;   // 基础半球光引用
   let flickerTimer = null;
 
   // 灯光闪烁效果
@@ -805,6 +859,28 @@ const SceneManager = (() => {
     }
 
     renderer.render(scene, camera);
+
+    // 灯光闪烁效果：蜡烛和壁炉的火焰自然抖动
+    const now = performance.now();
+    sceneObjects.forEach(obj => {
+      if (obj.isLight && obj.isOn) {
+        const lightMesh = obj.group?.children?.find(c => c.isLight && c.name === 'objectLight');
+        if (!lightMesh) return;
+        if (obj.type === 'candle') {
+          // 蜡烛：快速微弱闪烁
+          const base = 3.0;
+          lightMesh.intensity = base + Math.sin(now * 0.008) * 0.3 + Math.sin(now * 0.013) * 0.2 + (Math.random() - 0.5) * 0.3;
+        } else if (obj.type === 'fireplace') {
+          // 壁炉：较慢大幅闪烁
+          const base = 7.0;
+          lightMesh.intensity = base + Math.sin(now * 0.004) * 0.8 + Math.sin(now * 0.007) * 0.5 + (Math.random() - 0.5) * 0.6;
+        } else if (obj.type === 'lamp') {
+          // 油灯：偶尔微弱波动
+          const base = 5.0;
+          lightMesh.intensity = base + Math.sin(now * 0.002) * 0.15;
+        }
+      }
+    });
 
     // 每6帧更新一次标签（性能优化）
     labelUpdateFrame++;
@@ -993,16 +1069,96 @@ const SceneManager = (() => {
     const lightMesh = obj.group.children.find(c => c.isLight && c.name === 'objectLight');
     if (!lightMesh) return null;
     
+    const glowMesh = obj.group.children.find(c => c.name === 'glowMesh');
+    
     obj.isOn = !obj.isOn;
     if (obj.isOn) {
-      const targetIntensity = obj.type === 'lamp' ? 2.5 : obj.type === 'candle' ? 1.5 : obj.type === 'fireplace' ? 3.5 : 2.0;
-      animateLightIntensity(lightMesh, 0, targetIntensity, 300);
+      // 增强灯光强度：灯5.0，蜡烛3.0，壁炉7.0
+      const targetIntensity = obj.type === 'lamp' ? 5.0 : obj.type === 'candle' ? 3.0 : obj.type === 'fireplace' ? 7.0 : 4.0;
+      animateLightIntensity(lightMesh, 0, targetIntensity, 400);
+      // 显示发光球
+      if (glowMesh) animateGlowOpacity(glowMesh, 0, 0.9, 300);
       obj.hint = obj.type === 'lamp' ? '💡 关灯' : obj.type === 'candle' ? '🕯️ 吹灭' : '🔥 熄火';
+      // 开灯后增强环境光和降低雾密度
+      applyLightingEnvironment(true);
     } else {
-      animateLightIntensity(lightMesh, lightMesh.intensity, 0, 200);
+      animateLightIntensity(lightMesh, lightMesh.intensity, 0, 300);
+      // 隐藏发光球
+      if (glowMesh) animateGlowOpacity(glowMesh, glowMesh.material.opacity, 0, 200);
       obj.hint = obj.type === 'lamp' ? '💡 开灯' : obj.type === 'candle' ? '🕯️ 点燃' : '🔥 生火';
+      // 关灯后恢复暗色环境
+      applyLightingEnvironment(false);
     }
     return obj.isOn;
+  }
+
+  // 根据房间内灯光状态动态调整环境
+  function applyLightingEnvironment(hasNewLight) {
+    // 统计当前亮着的灯数量
+    const litLights = sceneObjects.filter(o => o.isLight && o.isOn);
+    const lightCount = litLights.length;
+
+    // 环境光：有灯时增强，无灯时压低
+    if (ambientLightBase) {
+      const targetAmbient = lightCount > 0 ? Math.min(0.3 + lightCount * 0.15, 0.8) : 0.3;
+      animateValue(ambientLightBase, 'intensity', ambientLightBase.intensity, targetAmbient, 500);
+    }
+    if (ambientLightRef) {
+      const targetAmbient2 = lightCount > 0 ? Math.min(0.3 + lightCount * 0.1, 0.6) : 0.15;
+      animateValue(ambientLightRef, 'intensity', ambientLightRef.intensity, targetAmbient2, 500);
+    }
+    if (hemiLightBase) {
+      const targetHemi = lightCount > 0 ? Math.min(0.2 + lightCount * 0.1, 0.5) : 0.2;
+      animateValue(hemiLightBase, 'intensity', hemiLightBase.intensity, targetHemi, 500);
+    }
+
+    // 雾密度：有灯时降低（视野更远），无灯时恢复
+    if (scene && scene.fog) {
+      const baseDensity = currentRoom?.template ? (ROOM_TEMPLATES[currentRoom.template]?.fogDensity || 0.02) : 0.02;
+      const targetDensity = lightCount > 0 ? Math.max(baseDensity * 0.3, 0.005) : baseDensity;
+      animateFogDensity(scene.fog.density, targetDensity, 600);
+    }
+
+    // toneMappingExposure：有灯时提亮
+    if (renderer) {
+      const targetExposure = lightCount > 0 ? Math.min(0.8 + lightCount * 0.3, 1.8) : 0.8;
+      animateValue(renderer, 'toneMappingExposure', renderer.toneMappingExposure, targetExposure, 500);
+    }
+  }
+
+  // 通用数值动画
+  function animateValue(obj, prop, from, to, duration) {
+    const startTime = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - startTime) / duration);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      obj[prop] = from + (to - from) * ease;
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  // 雾密度动画
+  function animateFogDensity(from, to, duration) {
+    const startTime = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - startTime) / duration);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      if (scene && scene.fog) scene.fog.density = from + (to - from) * ease;
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  // 发光球透明度动画
+  function animateGlowOpacity(mesh, from, to, duration) {
+    const startTime = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - startTime) / duration);
+      mesh.material.opacity = from + (to - from) * t;
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
   }
 
   function animateLightIntensity(light, from, to, duration) {
