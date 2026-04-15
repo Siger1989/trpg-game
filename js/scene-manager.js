@@ -621,15 +621,17 @@ const SceneManager = (() => {
       interactionRange: compilerDefaults?.requiredRange || 1.5
     };
     sceneObjects.push(objState);
-    // 如果初始就是亮的，设置PointLight强度
-    if (objState.isLight && objState.isOn) {
-      const lightMesh = group.children.find(c => c.isLight && c.name === 'objectLight');
-      if (lightMesh) {
-        lightMesh.intensity = objState.type === 'lamp' ? 5.0 : objState.type === 'candle' ? 3.0 : objState.type === 'fireplace' ? 7.0 : 4.0;
+    // 灯光对象：保存lightRef/glowRef引用，避免后续每次切换都搜索children
+    if (objState.isLight) {
+      objState.lightRef = group.children.find(c => c.isLight && c.name === 'objectLight') || null;
+      objState.glowRef  = group.children.find(c => c.name === 'glowMesh') || null;
+      // 如果初始就是亮的，设置PointLight强度
+      if (objState.isOn) {
+        if (objState.lightRef) {
+          objState.lightRef.intensity = objState.type === 'lamp' ? 5.0 : objState.type === 'candle' ? 3.0 : objState.type === 'fireplace' ? 7.0 : 4.0;
+        }
+        if (objState.glowRef) objState.glowRef.material.opacity = 0.9;
       }
-      // 显示发光球
-      const glowMesh = group.children.find(c => c.name === 'glowMesh');
-      if (glowMesh) glowMesh.material.opacity = 0.9;
     }
   }
 
@@ -1062,16 +1064,26 @@ const SceneManager = (() => {
   }
 
   // ========== 灯光开关 ==========
-  function toggleObjectLight(gx, gz) {
+  // on: undefined=toggle, true=强制开, false=强制关
+  function toggleObjectLight(gx, gz, on) {
     const obj = sceneObjects.find(o => o.gridX === gx && o.gridZ === gz && o.isLight);
     if (!obj) return null;
-    
-    const lightMesh = obj.group.children.find(c => c.isLight && c.name === 'objectLight');
+
+    // 优先使用保存的lightRef，退路：在group.children中查找
+    const lightMesh = obj.lightRef || obj.group.children.find(c => c.isLight && c.name === 'objectLight');
     if (!lightMesh) return null;
-    
-    const glowMesh = obj.group.children.find(c => c.name === 'glowMesh');
-    
-    obj.isOn = !obj.isOn;
+    // 同步保存引用，避免下次再搜索
+    if (!obj.lightRef) obj.lightRef = lightMesh;
+
+    const glowMesh = obj.glowRef || obj.group.children.find(c => c.name === 'glowMesh');
+    if (glowMesh && !obj.glowRef) obj.glowRef = glowMesh;
+
+    // 确定目标状态：传入on时强制，否则toggle
+    const nextOn = (on !== undefined) ? !!on : !obj.isOn;
+    // 状态未变则直接返回当前状态（幂等）
+    if (nextOn === obj.isOn) return obj.isOn;
+
+    obj.isOn = nextOn;
     if (obj.isOn) {
       // 增强灯光强度：灯5.0，蜡烛3.0，壁炉7.0
       const targetIntensity = obj.type === 'lamp' ? 5.0 : obj.type === 'candle' ? 3.0 : obj.type === 'fireplace' ? 7.0 : 4.0;

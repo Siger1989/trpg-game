@@ -142,12 +142,16 @@ const DMEngine = (() => {
       const narration = narrationMatch ? narrationMatch[1].trim() : '你来到了一个新的地方...';
 
       const baseAtm = getAtmosphereForMood(answers?.mood || 'gothic', idx);
-      scenario.scenes.push({
+      const rawScene = {
         id: sceneId, name: match[1].trim(), room: roomType, width: w, height: h,
         atmosphere: { ...baseAtm, fogDensity, lightIntensity },
         objects, narration,
         choices: [], enemies: []
-      });
+      };
+
+      // 尝试通过SceneCompiler编译
+      const compiledScene = tryCompileScene(rawScene, answers?.mood);
+      scenario.scenes.push(compiledScene);
       idx++;
     }
 
@@ -159,26 +163,29 @@ const DMEngine = (() => {
         const roomType = mapRoomType(match[2].trim());
         const w = Math.max(4, parseInt(match[3]) || 5);
         const h = Math.max(4, parseInt(match[4]) || 5);
-        scenario.scenes.push({
+        const rawScene = {
           id: sceneId, name: match[1].trim(), room: roomType, width: w, height: h,
           atmosphere: getAtmosphereForMood(answers?.mood || 'gothic', idx),
           objects: generateObjectsForRoom(roomType, w, h, answers?.mood),
           narration: match[5].trim(),
           choices: [], enemies: []
-        });
+        };
+        const compiledScene = tryCompileScene(rawScene, answers?.mood);
+        scenario.scenes.push(compiledScene);
         idx++;
       }
     }
 
     if (scenario.scenes.length === 0) {
-      scenario.scenes.push({
+      const rawScene = {
         id: 'scene_0', name: scenario.title || '神秘之地', room: 'room_medium', width: 5, height: 5,
         atmosphere: { fogDensity: 0.025, ambientIntensity: 0.2, lightColor: 0xffeedd, lightIntensity: 0.5 },
         objects: generateObjectsForRoom('room_medium', 5, 5, answers?.mood),
         narration: scenario.description || '你来到了一个陌生的地方...',
         choices: [{ text: '调查周围', action: 'investigate' },{ text: '仔细聆听', action: 'listen' },{ text: '寻找出口', action: 'find_exit' }],
         enemies: []
-      });
+      };
+      scenario.scenes.push(tryCompileScene(rawScene, answers?.mood));
     }
 
     for (let i = 0; i < scenario.scenes.length; i++) {
@@ -198,20 +205,190 @@ const DMEngine = (() => {
     return scenario;
   }
 
-  // 解析AI返回的物件列表字符串
+  /**
+   * 尝试通过SceneCompiler编译场景
+   * 编译器会：规范尺寸、分配槽位、校验连通性、生成反向叙事
+   * 编译失败则降级返回原始场景
+   */
+  function tryCompileScene(rawScene, mood) {
+    if (typeof SceneCompiler === 'undefined' || !SceneCompiler.compileScene) {
+      return rawScene; // 编译器不可用，直接返回
+    }
+
+    try {
+      // 构建编译器输入格式
+      const spec = {
+        scene_id: rawScene.id,
+        room_type: rawScene.room,
+        shape: SceneCompiler.ROOM_TYPE_DEFAULTS?.[rawScene.room]?.defaultShape || 'rect',
+        size: { w: rawScene.width, h: rawScene.height },
+        objects: (rawScene.objects || []).map(o => ({
+          type: o.type,
+          role: SceneCompiler.TYPE_DEFAULTS?.[o.type]?.role || 'atmosphere',
+          zone: o.zone || null,
+          near: o.near || null
+        })),
+        mood: mood || 'neutral',
+        fog_density: rawScene.atmosphere?.fogDensity || 0.025,
+        ambient_light: rawScene.atmosphere?.ambientIntensity || 0.5,
+        connections: []
+      };
+
+      // 规范化+编译
+      const normalized = SceneCompiler.normalizeSceneSpec(spec);
+      if (!normalized) return rawScene;
+
+      const compiled = SceneCompiler.compileScene(normalized);
+      if (!compiled) return rawScene;
+
+      // 编译成功：转换回DMEngine场景格式
+      const compiledScene = {
+        id: compiled.scene_id,
+        name: rawScene.name,
+        room: compiled.room_type,
+        width: compiled.size.w,
+        height: compiled.size.h,
+        atmosphere: {
+          fogDensity: compiled.atmosphere.fogDensity,
+          ambientIntensity: compiled.atmosphere.ambientIntensity,
+          lightColor: rawScene.atmosphere?.lightColor || 0xffeedd,
+          lightIntensity: rawScene.atmosphere?.lightIntensity || 0.5,
+          mood: compiled.atmosphere.mood
+        },
+        objects: compiled.objects.map(o => ({
+          type: o.type,
+          x: o.x,
+          z: o.z,
+          // 保留编译器生成的交互元数据
+          role: o.role,
+          actions: o.actions,
+          requiredRange: o.requiredRange,
+          needsLOS: o.needsLOS
+        })),
+        narration: rawScene.narration || SceneCompiler.generateNarration(compiled),
+        choices: rawScene.choices || [],
+        enemies: rawScene.enemies || []
+      };
+
+      console.log(`[SceneCompiler] 场景"${compiledScene.name}"编译成功: ${compiled.objects.length}个物件, ${compiled.size.w}x${compiled.size.h}`);
+      return compiledScene;
+
+    } catch (err) {
+      console.warn('[SceneCompiler] 编译失败，降级到原始场景:', err);
+      return rawScene;
+    }
+  }
+
+  // 解析AI返回的物件列表字符串（增强版）
+  // 支持多种格式：
+  //   type:x,z  (原有格式)
+  //   type(x,z) (括号格式)
+  //   type@x,z  (@分隔格式)
+  //   type x z  (空格分隔格式)
+  //   type(x,y) (中文逗号)
+  // 同时做语义映射、类型验证、重叠检测
   function parseObjectList(str, maxW, maxH) {
     const objects = [];
     if (!str) return objects;
-    // 格式：table:2,2,candle:1,1,bookshelf:0,0
-    const parts = str.split(',');
-    for (let i = 0; i < parts.length - 2; i += 3) {
-      const type = parts[i].trim().replace(/[^a-z_]/gi, '');
-      const x = parseInt(parts[i + 1]);
-      const z = parseInt(parts[i + 2]);
-      if (type && !isNaN(x) && !isNaN(z) && x >= 0 && x < maxW && z >= 0 && z < maxH) {
+
+    // 合法物件类型集合（来自SceneCompiler.TYPE_DEFAULTS或内置列表）
+    const VALID_TYPES = new Set([
+      'lamp', 'candle', 'fireplace', 'door', 'chest', 'wardrobe',
+      'altar', 'statue', 'bookshelf', 'desk', 'skeleton', 'mirror',
+      'table', 'pillar', 'crate', 'barrel', 'bed', 'chair', 'rug',
+      'painting'
+    ]);
+
+    // 语义映射（复用SceneCompiler的映射表）
+    const semanticMap = (typeof SceneCompiler !== 'undefined' && SceneCompiler.SEMANTIC_MAP)
+      ? SceneCompiler.SEMANTIC_MAP
+      : {
+          ritual_table: 'altar', ritual_circle: 'altar', shrine: 'altar',
+          couch: 'bed', sofa: 'bed', cot: 'bed',
+          cabinet: 'wardrobe', closet: 'wardrobe', drawer: 'desk',
+          torch: 'lamp', lantern: 'lamp', chandelier: 'lamp',
+          shelf: 'bookshelf', shelves: 'bookshelf',
+          box: 'crate', trunk: 'chest', safe: 'chest',
+          column: 'pillar', post: 'pillar',
+          painting_frame: 'painting', portrait: 'painting', photo: 'painting',
+          brazier: 'fireplace', hearth: 'fireplace',
+          remains: 'skeleton', corpse: 'skeleton', bones: 'skeleton',
+          book: 'bookshelf', diary: 'desk', letter: 'desk',
+          rug_carpet: 'rug', carpet: 'rug'
+        };
+
+    const occupiedPositions = new Set();
+
+    // 尝试多种格式解析
+    // 格式1: type:x,z 或 type:x，z（中文逗号）
+    const format1 = /([a-z_]+)\s*[:：]\s*(\d+)\s*[,，]\s*(\d+)/gi;
+    // 格式2: type(x,z) 或 type（x，z）
+    const format2 = /([a-z_]+)\s*[（(]\s*(\d+)\s*[,，]\s*(\d+)\s*[）)]/gi;
+    // 格式3: type@x,z
+    const format3 = /([a-z_]+)\s*@\s*(\d+)\s*[,，]\s*(\d+)/gi;
+    // 格式4: type x z (空格分隔，需type在前)
+    const format4 = /([a-z_]+)\s+(\d+)\s+(\d+)/gi;
+
+    const patterns = [format1, format2, format3, format4];
+
+    for (const pattern of patterns) {
+      let match;
+      while ((match = pattern.exec(str)) !== null) {
+        let type = match[1].toLowerCase().replace(/[^a-z_]/g, '');
+        const x = parseInt(match[2]);
+        const z = parseInt(match[3]);
+
+        if (!type || isNaN(x) || isNaN(z)) continue;
+
+        // 语义映射：未知类型→最近已知类型
+        type = semanticMap[type] || type;
+
+        // 类型验证：不在合法集合中则跳过
+        if (!VALID_TYPES.has(type)) {
+          console.warn(`[parseObjectList] 忽略未知物件类型: "${match[1]}" → 映射为 "${type}"`);
+          continue;
+        }
+
+        // 坐标范围检查
+        if (x < 0 || x >= maxW || z < 0 || z >= maxH) {
+          console.warn(`[parseObjectList] 物件${type}坐标(${x},${z})超出房间范围(${maxW}x${maxH})，已跳过`);
+          continue;
+        }
+
+        // 重叠检测
+        const posKey = `${x},${z}`;
+        if (occupiedPositions.has(posKey)) {
+          console.warn(`[parseObjectList] 位置(${x},${z})已有物件，跳过重复的${type}`);
+          continue;
+        }
+
+        occupiedPositions.add(posKey);
         objects.push({ type, x, z });
       }
     }
+
+    // 如果所有格式都没解析出物件，尝试原有格式作为兜底
+    if (objects.length === 0) {
+      const parts = str.split(',');
+      for (let i = 0; i < parts.length - 2; i += 3) {
+        let type = parts[i].trim().replace(/[^a-z_]/gi, '');
+        const x = parseInt(parts[i + 1]);
+        const z = parseInt(parts[i + 2]);
+        if (!type || isNaN(x) || isNaN(z)) continue;
+        type = semanticMap[type] || type;
+        if (!VALID_TYPES.has(type)) continue;
+        if (x < 0 || x >= maxW || z < 0 || z >= maxH) continue;
+        const posKey = `${x},${z}`;
+        if (occupiedPositions.has(posKey)) continue;
+        occupiedPositions.add(posKey);
+        objects.push({ type, x, z });
+      }
+    }
+
+    if (objects.length > 0) {
+      console.log(`[parseObjectList] 解析出${objects.length}个物件: ${objects.map(o => `${o.type}(${o.x},${o.z})`).join(', ')}`);
+    }
+
     return objects;
   }
 
@@ -342,6 +519,12 @@ const DMEngine = (() => {
       scene.narration = scene.narration || '你来到了一个新的地方...';
       scene.choices = scene.choices || [];
       scene.enemies = scene.enemies || [];
+      // 尝试通过SceneCompiler编译
+      const compiled = tryCompileScene(scene, answers?.mood);
+      if (compiled !== scene) {
+        // 编译成功，用编译后的结果替换
+        Object.assign(scene, compiled);
+      }
     });
     return data;
   }

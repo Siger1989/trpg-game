@@ -101,8 +101,10 @@ const RoomInteraction = (() => {
    */
   function bindTarget(text, verb, room) {
     const candidates = room.objects.filter(o => o.visible && o.discovered);
+    // 曾经见过但当前不在视野内的对象（KNOWN状态）
+    const dimCandidates = room.objects.filter(o => !o.visible && o.discovered);
 
-    // 1. 别名或名称直接命中
+    // 1. 别名或名称直接命中（优先当前可见对象）
     const directMatches = [];
     for (const obj of candidates) {
       const names = [obj.name, ...(obj.aliases || [])];
@@ -117,6 +119,16 @@ const RoomInteraction = (() => {
       // 按别名长度降序，优先匹配更具体的
       directMatches.sort((a, b) => b.aliasLen - a.aliasLen);
       return directMatches[0].obj;
+    }
+
+    // 1.5 在模糊记忆中的对象命中（KNOWN状态）— 返回特殊标记
+    for (const obj of dimCandidates) {
+      const names = [obj.name, ...(obj.aliases || [])];
+      for (const alias of names) {
+        if (alias && text.includes(alias)) {
+          return { ...obj, _dimlyRemembered: true };
+        }
+      }
     }
 
     // 2. 动作唯一反推
@@ -192,11 +204,13 @@ const RoomInteraction = (() => {
    */
   function buildRoomState(sceneObjects, playerPos, scene) {
     const objects = (sceneObjects || []).map(obj => {
-      // 判断可见性和发现状态
-      // 当前MVP：所有场景对象默认可见和已发现
-      // 未来接入迷雾系统后，根据FogOfWar状态判断
-      const visible = true; // TODO: 接入FogOfWar
-      const discovered = true; // TODO: 接入FogOfWar
+      // 判断可见性和发现状态 — 接入FogOfWar
+      // EXPLORED(2)=当前可见, KNOWN(1)=曾经见过, UNDISCOVERED(0)=从未发现
+      const fogState = (typeof FogOfWar !== 'undefined' && FogOfWar.isInitialized())
+        ? FogOfWar.getCellState(obj.gridX || 0, obj.gridZ || 0)
+        : 2; // 迷雾未初始化时默认可见
+      const visible = fogState === 2;   // EXPLORED = 当前在视野内
+      const discovered = fogState >= 1; // KNOWN或EXPLORED = 曾经发现过
 
       // 判断可交互性
       const interactable = visible && discovered && (obj.availableActions || []).length > 0;
@@ -566,9 +580,10 @@ const RoomInteraction = (() => {
 
   // ========== 10. 场景描述函数 ==========
   function describeRoom(room) {
-    const visible = room.objects.filter(o => o.visible);
+    const visible = room.objects.filter(o => o.visible);       // EXPLORED: 当前在视野内
+    const knownButHidden = room.objects.filter(o => !o.visible && o.discovered); // KNOWN: 曾经见过但当前不在视野
 
-    // 按类型分组
+    // 按类型分组（仅当前可见的）
     const lights = visible.filter(o => o._ref?.isLight);
     const doors = visible.filter(o => o.type === 'door' || o._ref?.type === 'door');
     const furniture = visible.filter(o => !o._ref?.isLight && o._ref?.type !== 'door');
@@ -586,7 +601,7 @@ const RoomInteraction = (() => {
       parts.push('四周一片昏暗。');
     }
 
-    // 可见物件
+    // 当前可见物件（EXPLORED状态）
     if (furniture.length > 0) {
       const names = furniture.slice(0, 5).map(o => o.name);
       if (furniture.length <= 3) {
@@ -606,6 +621,12 @@ const RoomInteraction = (() => {
     // 出口
     if (doors.length > 0) {
       parts.push('房间里有门。');
+    }
+
+    // 模糊记忆中的物件（KNOWN状态，不在当前视野但曾经见过）
+    if (knownButHidden.length > 0) {
+      const dimNames = knownButHidden.slice(0, 3).map(o => o.name);
+      parts.push(`在阴影的边缘，你隐约记得那边有${dimNames.join('、')}的轮廓。`);
     }
 
     return parts.join('');
@@ -667,6 +688,17 @@ const RoomInteraction = (() => {
       // 尝试模糊匹配：看看输入是否包含任何对象别名
       const fuzzyTarget = fuzzyMatchObject(text, room);
       if (fuzzyTarget) {
+        if (fuzzyTarget._dimlyRemembered) {
+          // 模糊记忆中的对象：提示看不清
+          return {
+            success: false,
+            code: 'TARGET_NOT_VISIBLE',
+            targetId: fuzzyTarget.id,
+            verb: 'inspect',
+            message: `你记得那边好像有${fuzzyTarget.name}的轮廓，但现在看不清了。也许需要靠近一些，或者找个光源。`,
+            uiHint: { highlightTargetId: fuzzyTarget.id }
+          };
+        }
         // 有模糊匹配结果，当作interact处理
         parsed.intent = 'interact';
         parsed.targetId = fuzzyTarget.id;
@@ -690,7 +722,17 @@ const RoomInteraction = (() => {
       // 歧义目标
       const targetLookup = room.objects.find(o => o.id === parsed.targetId);
       if (!targetLookup) {
-        // 可能是歧义标记
+        // 可能是歧义标记，或模糊记忆中的对象
+        if (parsed._dimlyRemembered) {
+          return {
+            success: false,
+            code: 'TARGET_NOT_VISIBLE',
+            targetId: parsed.targetId,
+            verb: parsed.verb,
+            message: `你记得那边好像有${parsed._dimlyRememberedName || '什么'}的轮廓，但现在看不清了。也许需要靠近一些，或者找个光源。`,
+            uiHint: { highlightTargetId: parsed.targetId }
+          };
+        }
         return {
           success: false,
           code: 'TARGET_NOT_FOUND',
@@ -702,12 +744,20 @@ const RoomInteraction = (() => {
 
       // 不可见/未发现
       if (!target.visible || !target.discovered) {
+        // 区分迷雾状态给出不同反馈
+        let msg = '你暂时还没有注意到这个目标。';
+        if (!target.discovered) {
+          msg = '你从未在这个房间里注意到这样的东西。';
+        } else if (!target.visible) {
+          // 曾经见过但当前不在视野内
+          msg = `你记得那边好像有${target.name}的轮廓，但现在看不清了。也许需要靠近一些，或者找个光源。`;
+        }
         return {
           success: false,
           code: 'TARGET_NOT_VISIBLE',
           targetId: target.id,
           verb: parsed.verb,
-          message: '你暂时还没有注意到这个目标。',
+          message: msg,
           uiHint: { highlightTargetId: target.id }
         };
       }
@@ -779,10 +829,17 @@ const RoomInteraction = (() => {
     const targetResult = bindTarget(text, verb, room);
 
     let targetId = undefined;
+    let _dimlyRemembered = false;
+    let _dimlyRememberedName = '';
     if (targetResult) {
       if (targetResult._ambiguous) {
         // 歧义：暂取第一个，但标记歧义
         targetId = targetResult.candidates[0]?.id;
+      } else if (targetResult._dimlyRemembered) {
+        // 模糊记忆中的对象：记录ID和名称，但标记为不可见
+        targetId = targetResult.id;
+        _dimlyRemembered = true;
+        _dimlyRememberedName = targetResult.name;
       } else {
         targetId = targetResult.id;
       }
@@ -792,6 +849,8 @@ const RoomInteraction = (() => {
       intent,
       verb,
       targetId,
+      _dimlyRemembered,
+      _dimlyRememberedName,
       rawText: text
     };
   }
@@ -807,12 +866,22 @@ const RoomInteraction = (() => {
   // ========== 14. 模糊匹配 ==========
   function fuzzyMatchObject(text, room) {
     const candidates = room.objects.filter(o => o.visible && o.discovered);
-    // 检查输入文本是否部分匹配任何对象名
+    const dimCandidates = room.objects.filter(o => !o.visible && o.discovered);
+    // 检查输入文本是否部分匹配任何对象名（优先当前可见对象）
     for (const obj of candidates) {
       const names = [obj.name, ...(obj.aliases || [])];
       for (const name of names) {
         if (name && (text.includes(name) || name.includes(text))) {
           return obj;
+        }
+      }
+    }
+    // 模糊记忆中的对象也尝试匹配
+    for (const obj of dimCandidates) {
+      const names = [obj.name, ...(obj.aliases || [])];
+      for (const name of names) {
+        if (name && (text.includes(name) || name.includes(text))) {
+          return { ...obj, _dimlyRemembered: true };
         }
       }
     }
