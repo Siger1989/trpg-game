@@ -1010,11 +1010,12 @@ html, body {
   /* 强制：非激活screen必须隐藏，防止任何穿透 */
   .screen:not(.active) { display: none !important; }
 
-  /* 游戏主界面竖屏布局：3D场景在上，对话在下 */
-  /* 注意：不设display，让.screen/.screen.active控制显隐，避免主菜单时穿透 */
+  /* 游戏主界面竖屏布局：3D场景在上，HUD在下，全部参与flex文档流 */
   #screen-game {
     flex-direction: column;
     position: relative;
+    height: 100vh;
+    height: 100dvh; /* 动态视口高度，排除手机地址栏 */
   }
   #screen-game.active { display: flex !important; }
 
@@ -1028,18 +1029,21 @@ html, body {
     flex-shrink: 0;
   }
 
-  /* HUD覆盖层：恢复absolute覆盖整个screen-game，这样hud-top可以浮在3D场景上 */
+  /* HUD层：竖屏时参与flex文档流，只占下半部分 */
   #game-hud {
-    position: absolute !important;
-    inset: 0 !important;
+    position: relative !important;
+    inset: auto !important;
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    pointer-events: none;
+    pointer-events: auto;
     z-index: 10;
+    background: rgba(10,10,15,0.95);
+    border-top: 1px solid var(--border);
   }
-  #game-hud > * { pointer-events: auto; }
 
-  /* 顶部状态栏：绝对定位在3D场景上方（absolute跟随screen-game，主菜单时screen-game隐藏则不显示） */
+  /* 顶部状态栏：浮在3D场景上方 */
   .hud-top {
     position: absolute;
     top: 0;
@@ -1058,9 +1062,8 @@ html, body {
   /* 中间区域：竖屏不需要 */
   .hud-middle { display: none; }
 
-  /* 快捷行动栏：竖屏时视觉合并到叙事面板顶部，推到屏幕下半部分 */
+  /* 快捷行动栏：竖屏时在HUD顶部，紧跟3D场景下方 */
   .hud-actions {
-    margin-top: 40vh;
     padding: 4px 10px 2px 10px;
     gap: 4px;
     flex-wrap: nowrap;
