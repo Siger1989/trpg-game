@@ -531,9 +531,29 @@ const DMEngine = (() => {
 
   // ========== 世界状态引擎 ==========
   function initWorld(scenarioId) {
-    const scenario = dynamicScenario || SCENARIOS[scenarioId];
+    // 如果有动态剧本（AI生成），使用动态剧本
+    if (dynamicScenario) {
+      worldState = { scenarioId: 'dynamic', currentSceneIndex: 0, visitedScenes: [], inventory: [], flags: {}, turnCount: 0 };
+      narrativeHistory = [];
+      facts = [];
+      npcStates = {};
+      plotState = 'intro';
+      resetAP();
+      addFact('scenario', dynamicScenario.title);
+      addFact('location', dynamicScenario.scenes[0].name);
+      return dynamicScenario;
+    }
+    
+    // 否则从预设剧本中随机选择一个（除了old_house）
+    const availableScenarios = Object.keys(SCENARIOS).filter(k => k !== 'old_house');
+    const randomId = availableScenarios.length > 0 
+      ? availableScenarios[Math.floor(Math.random() * availableScenarios.length)]
+      : 'old_house';
+    
+    const scenario = SCENARIOS[randomId];
     if (!scenario) return null;
-    worldState = { scenarioId: dynamicScenario ? 'dynamic' : scenarioId, currentSceneIndex: 0, visitedScenes: [], inventory: [], flags: {}, turnCount: 0 };
+    
+    worldState = { scenarioId: randomId, currentSceneIndex: 0, visitedScenes: [], inventory: [], flags: {}, turnCount: 0 };
     narrativeHistory = [];
     facts = [];
     npcStates = {};
