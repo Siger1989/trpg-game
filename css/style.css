@@ -1007,7 +1007,7 @@ html, body {
 
 /* ========== 手机竖屏适配 ========== */
 @media (max-width: 768px) and (orientation: portrait) {
-  /* 游戏主界面竖屏布局：3D场景在上，叙事在下 */
+  /* 游戏主界面竖屏布局：3D场景在上，对话在下 */
   #screen-game {
     display: flex;
     flex-direction: column;
@@ -1018,12 +1018,12 @@ html, body {
     position: relative !important;
     inset: auto !important;
     width: 100%;
-    height: 45vh;
-    min-height: 200px;
+    height: 40vh;
+    min-height: 180px;
     flex-shrink: 0;
   }
 
-  /* HUD覆盖层改为流式布局 */
+  /* HUD覆盖层改为流式布局，下半部分 */
   #game-hud {
     position: relative !important;
     inset: auto !important;
@@ -1035,10 +1035,16 @@ html, body {
   }
   #game-hud > * { pointer-events: auto; }
 
-  /* 顶部状态栏：紧凑化 */
+  /* 顶部状态栏：覆盖在3D场景上方 */
   .hud-top {
+    order: -1;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
     padding: 6px 10px;
-    background: rgba(0,0,0,0.85);
+    background: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent);
     flex-shrink: 0;
   }
   .char-status { gap: 6px; }
@@ -1049,29 +1055,35 @@ html, body {
   /* 中间区域：竖屏不需要 */
   .hud-middle { display: none; }
 
-  /* 快捷行动栏：横向滚动，紧凑 */
+  /* 快捷行动栏：竖屏时视觉合并到叙事面板顶部 */
   .hud-actions {
-    padding: 6px 10px;
+    order: 3;
+    padding: 4px 10px 2px 10px;
     gap: 4px;
     flex-wrap: nowrap;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     flex-shrink: 0;
+    background: rgba(10,10,15,0.92);
+    border-bottom: 1px solid var(--border);
+    border-top: none;
+    margin: 0;
   }
   .action-btn {
-    padding: 6px 10px;
-    font-size: 0.8em;
+    padding: 5px 8px;
+    font-size: 0.75em;
     flex-shrink: 0;
   }
-  .ap-display { font-size: 0.8em; padding: 4px 8px; }
+  .ap-display { font-size: 0.75em; padding: 3px 6px; }
 
-  /* 叙事面板：占下半部分 */
+  /* 叙事面板：竖屏时紧跟动作栏，视觉一体 */
   .hud-narrative {
+    order: 4;
     flex: 1;
     min-height: 0;
     max-height: none;
     padding: 0 10px 8px 10px;
-    border-top: 1px solid var(--border);
+    border-top: none;
     resize: none;
     overflow: hidden;
     display: flex;
