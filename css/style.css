@@ -1007,12 +1007,16 @@ html, body {
 
 /* ========== 手机竖屏适配 ========== */
 @media (max-width: 768px) and (orientation: portrait) {
+  /* 强制：非激活screen必须隐藏，防止任何穿透 */
+  .screen:not(.active) { display: none !important; }
+
   /* 游戏主界面竖屏布局：3D场景在上，对话在下 */
   /* 注意：不设display，让.screen/.screen.active控制显隐，避免主菜单时穿透 */
   #screen-game {
     flex-direction: column;
     position: relative;
   }
+  #screen-game.active { display: flex !important; }
 
   /* 3D场景容器：竖屏时占上半部分 */
   #scene-container {
