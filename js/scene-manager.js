@@ -873,13 +873,10 @@ const SceneManager = (() => {
 
   // 加载monster.glb替换主角
   function loadPlayerModel(url) {
-    if (!window._gltfLoaderReady) {
-      // GLTFLoader还没加载完，等一下
-      window.addEventListener('gltf-loader-ready', () => loadPlayerModel(url), { once: true });
-      return;
-    }
+    console.log('loadPlayerModel called with:', url);
     const loader = new THREE.GLTFLoader();
     loader.load(url, (gltf) => {
+      console.log('GLB模型加载成功:', gltf);
       const model = gltf.scene;
       // 缩放适配格子大小
       model.scale.set(0.5, 0.5, 0.5);
@@ -910,7 +907,7 @@ const SceneManager = (() => {
       scene.add(playerMesh);
       updatePlayerWorldPos();
     }, undefined, (err) => {
-      console.warn('GLB模型加载失败，使用默认模型:', err);
+      console.error('GLB模型加载失败，使用默认模型:', err);
     });
   }
 

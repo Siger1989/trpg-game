@@ -255,6 +255,10 @@ document.addEventListener('DOMContentLoaded', () => {
     try { loadCurrentScene(); } catch(e) {}
     UI.updateHUD(); UI.addNarration(DMEngine.getNarration(), 'dm'); showChoices(DMEngine.getChoices());
     DMEngine.resetAP(); UI.updateHUD();
+    // 加载GLB模型替换主角
+    if (typeof SceneManager !== 'undefined' && SceneManager.loadPlayerModel) {
+      SceneManager.loadPlayerModel('assets/monster.glb');
+    }
     // 竖屏设备自动显示方向键
     const mc = document.getElementById('mobile-controls');
     if (mc && window.matchMedia('(max-width: 768px)').matches) {
