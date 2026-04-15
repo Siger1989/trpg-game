@@ -1010,6 +1010,19 @@ html, body {
   /* 强制：非激活screen必须隐藏，防止任何穿透 */
   .screen:not(.active) { display: none !important; }
 
+  /* 问卷/角色创建等非游戏页面需要纵向滚动 */
+  #screen-scenario-survey.active,
+  #screen-char-create.active,
+  #screen-about.active {
+    position: relative !important;
+    inset: auto !important;
+    height: auto !important;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
   /* 游戏主界面竖屏布局：3D场景在上，HUD在下，全部参与flex文档流 */
   #screen-game {
     flex-direction: column;
@@ -1169,19 +1182,36 @@ html, body {
   }
   .dice-number { font-size: 3em; }
 
-  /* 问卷页面适配 - 禁止横滚 */
-  #screen-scenario-survey { overflow-x: hidden; }
-  .survey-container { padding: 0 10px; max-width: 100%; box-sizing: border-box; }
-  .survey-title { font-size: 1.3em; }
-  .survey-opt-btn { 
-    padding: 10px 12px; 
-    font-size: 0.85em; 
-    word-break: break-word;
+  /* 问卷页面适配 - 真正适配手机宽度 */
+  #screen-scenario-survey {
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 16px 8px;
+  }
+  .survey-container {
+    padding: 0 4px;
+    max-width: 100%;
     box-sizing: border-box;
   }
-  .survey-progress { gap: 4px; }
-  .progress-step { font-size: 0.75em; padding: 4px 8px; }
-  .scenario-preview { padding: 14px; font-size: 0.9em; }
+  .survey-title { font-size: 1.2em; margin-bottom: 2px; }
+  .survey-subtitle { font-size: 0.85em; margin-bottom: 16px; }
+  .survey-opt-btn { 
+    padding: 10px 10px; 
+    font-size: 0.82em; 
+    word-break: break-word;
+    box-sizing: border-box;
+    width: 100%;
+    text-align: left;
+    white-space: normal;
+  }
+  .survey-step h3 { font-size: 1em; margin-bottom: 12px; }
+  .survey-progress { gap: 4px; flex-wrap: wrap; }
+  .progress-step { font-size: 0.72em; padding: 3px 6px; }
+  .scenario-preview { padding: 10px; font-size: 0.85em; }
+  .survey-nav { gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .survey-nav .btn { font-size: 0.85em; padding: 8px 12px; }
+  .survey-actions { flex-direction: column; gap: 8px; }
+  .survey-actions .btn { width: 100%; }
 
   /* 角色创建适配 */
   #paperdoll-canvas { width: 180px; height: 240px; }

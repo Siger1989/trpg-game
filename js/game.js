@@ -23,6 +23,8 @@ const UI = (() => {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     const t = document.getElementById(`screen-${id}`);
     if (t) t.classList.add('active');
+    // 游戏/战斗screen禁止body滚动，其他screen（问卷/角色创建/关于）允许滚动
+    document.body.style.overflow = (id === 'game') ? 'hidden' : 'auto';
   }
   function addNarration(text, type = 'dm') {
     const c = document.getElementById('narrative-text');
