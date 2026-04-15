@@ -1008,8 +1008,8 @@ html, body {
 /* ========== 手机竖屏适配 ========== */
 @media (max-width: 768px) and (orientation: portrait) {
   /* 游戏主界面竖屏布局：3D场景在上，对话在下 */
+  /* 注意：不设display，让.screen/.screen.active控制显隐，避免主菜单时穿透 */
   #screen-game {
-    display: flex;
     flex-direction: column;
     position: relative;
   }
