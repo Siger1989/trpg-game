@@ -267,16 +267,6 @@
   <script src="js/three.min.js"></script>
   <!-- GLTFLoader（从ESM转为全局脚本） -->
   <script src="js/GLTFLoader.js"></script>
-  <script src="js/GLTFLoader.js"></script>
-  <!-- GLTFLoader桥接：用ES module加载后挂到window.THREE上 -->
-  <script type="module">
-    import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
-    window.THREE.GLTFLoader = GLTFLoader;
-    window._gltfLoaderReady = true;
-    window.dispatchEvent(new Event('gltf-loader-ready'));
-  </script>
-  <!-- GLTF模型加载器（ESM包装） -->
-  <script src="js/gltf-loader.js"></script>
   <!-- 相机控制器 -->
   <script src="js/camera-controls.js"></script>
   <!-- 游戏模块 -->

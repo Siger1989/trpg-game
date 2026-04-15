@@ -1,33 +1,71 @@
-﻿const { AnimationClip, Bone, Box3, BufferAttribute, BufferGeometry, ClampToEdgeWrapping, Color, ColorManagement, DirectionalLight, DoubleSide, FileLoader, FrontSide, Group, ImageBitmapLoader, InstancedMesh, InterleavedBuffer, InterleavedBufferAttribute, Interpolant, InterpolateDiscrete, InterpolateLinear, Line, LineBasicMaterial, LineLoop, LineSegments, LinearFilter, LinearMipmapLinearFilter, LinearMipmapNearestFilter, LinearSRGBColorSpace, Loader, LoaderUtils, Material, MathUtils, Matrix4, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, MirroredRepeatWrapping, NearestFilter, NearestMipmapLinearFilter, NearestMipmapNearestFilter, NumberKeyframeTrack, Object3D, OrthographicCamera, PerspectiveCamera, PointLight, Points, PointsMaterial, PropertyBinding, Quaternion, QuaternionKeyframeTrack, RepeatWrapping, Skeleton, SkinnedMesh, Sphere, SpotLight, Texture, TextureLoader, TriangleFanDrawMode, TriangleStripDrawMode, Vector2, Vector3, VectorKeyframeTrack, SRGBColorSpace, InstancedBufferAttribute } = THREE;
-// toTrianglesDrawMode 内联（来自 BufferGeometryUtils）
-function toTrianglesDrawMode(geometry, drawMode) {
-  if (drawMode === TriangleFanDrawMode) {
-    const index = geometry.getIndex();
-    const positions = geometry.getAttribute('position');
-    if (!index && positions) {
-      const stride = 3;
-      const count = positions.count;
-      const indices = [];
-      for (let i = 1; i < count - 1; i++) { indices.push(0, i, i + 1); }
-      geometry.setIndex(indices);
-      geometry.addGroup(0, indices.length, 0);
-    }
-  } else if (drawMode === TriangleStripDrawMode) {
-    const index = geometry.getIndex();
-    const positions = geometry.getAttribute('position');
-    if (!index && positions) {
-      const count = positions.count;
-      const indices = [];
-      for (let i = 0; i < count - 2; i++) {
-        if (i % 2 === 0) indices.push(i, i + 1, i + 2);
-        else indices.push(i + 2, i + 1, i);
-      }
-      geometry.setIndex(indices);
-      geometry.addGroup(0, indices.length, 0);
-    }
-  }
-  return geometry;
-}
+import {
+	AnimationClip,
+	Bone,
+	Box3,
+	BufferAttribute,
+	BufferGeometry,
+	ClampToEdgeWrapping,
+	Color,
+	ColorManagement,
+	DirectionalLight,
+	DoubleSide,
+	FileLoader,
+	FrontSide,
+	Group,
+	ImageBitmapLoader,
+	InstancedMesh,
+	InterleavedBuffer,
+	InterleavedBufferAttribute,
+	Interpolant,
+	InterpolateDiscrete,
+	InterpolateLinear,
+	Line,
+	LineBasicMaterial,
+	LineLoop,
+	LineSegments,
+	LinearFilter,
+	LinearMipmapLinearFilter,
+	LinearMipmapNearestFilter,
+	LinearSRGBColorSpace,
+	Loader,
+	LoaderUtils,
+	Material,
+	MathUtils,
+	Matrix4,
+	Mesh,
+	MeshBasicMaterial,
+	MeshPhysicalMaterial,
+	MeshStandardMaterial,
+	MirroredRepeatWrapping,
+	NearestFilter,
+	NearestMipmapLinearFilter,
+	NearestMipmapNearestFilter,
+	NumberKeyframeTrack,
+	Object3D,
+	OrthographicCamera,
+	PerspectiveCamera,
+	PointLight,
+	Points,
+	PointsMaterial,
+	PropertyBinding,
+	Quaternion,
+	QuaternionKeyframeTrack,
+	RepeatWrapping,
+	Skeleton,
+	SkinnedMesh,
+	Sphere,
+	SpotLight,
+	Texture,
+	TextureLoader,
+	TriangleFanDrawMode,
+	TriangleStripDrawMode,
+	Vector2,
+	Vector3,
+	VectorKeyframeTrack,
+	SRGBColorSpace,
+	InstancedBufferAttribute
+} from 'three';
+import { toTrianglesDrawMode } from '../utils/BufferGeometryUtils.js';
 
 class GLTFLoader extends Loader {
 
@@ -4622,6 +4660,4 @@ function addPrimitiveAttributes( geometry, primitiveDef, parser ) {
 
 }
 
-// 挂载到THREE全局对象
-THREE.GLTFLoader = GLTFLoader;
-
+export { GLTFLoader };
