@@ -1151,10 +1151,19 @@ html, body {
   }
   .dice-number { font-size: 3em; }
 
-  /* 问卷页面适配 */
-  .survey-container { padding: 0 12px; }
-  .survey-title { font-size: 1.4em; }
-  .survey-opt-btn { padding: 10px 14px; font-size: 0.9em; }
+  /* 问卷页面适配 - 禁止横滚 */
+  #screen-scenario-survey { overflow-x: hidden; }
+  .survey-container { padding: 0 10px; max-width: 100%; box-sizing: border-box; }
+  .survey-title { font-size: 1.3em; }
+  .survey-opt-btn { 
+    padding: 10px 12px; 
+    font-size: 0.85em; 
+    word-break: break-word;
+    box-sizing: border-box;
+  }
+  .survey-progress { gap: 4px; }
+  .progress-step { font-size: 0.75em; padding: 4px 8px; }
+  .scenario-preview { padding: 14px; font-size: 0.9em; }
 
   /* 角色创建适配 */
   #paperdoll-canvas { width: 180px; height: 240px; }

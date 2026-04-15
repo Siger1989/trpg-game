@@ -176,6 +176,16 @@ const PaperDoll = (() => {
     const outfit = PARTS.outfit[s.outfit];
     const skin = PARTS.skinTones[s.skinTone] || PARTS.skinTones[0];
 
+    // 身体阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.moveTo(-38, 200);
+    ctx.quadraticCurveTo(-48, 250, -43, 382);
+    ctx.lineTo(47, 382);
+    ctx.quadraticCurveTo(52, 250, 42, 200);
+    ctx.closePath();
+    ctx.fill();
+
     // 身体轮廓
     ctx.fillStyle = outfit.color;
     ctx.beginPath();
@@ -186,6 +196,25 @@ const PaperDoll = (() => {
     ctx.closePath();
     ctx.fill();
 
+    // 身体轮廓线
+    ctx.strokeStyle = adjustColor(outfit.color, -30);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-40, 200);
+    ctx.quadraticCurveTo(-50, 250, -45, 380);
+    ctx.lineTo(45, 380);
+    ctx.quadraticCurveTo(50, 250, 40, 200);
+    ctx.closePath();
+    ctx.stroke();
+
+    // 身体中线（衣缝）
+    ctx.strokeStyle = adjustColor(outfit.color, -20);
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(0, 195);
+    ctx.lineTo(0, 380);
+    ctx.stroke();
+
     // 手臂
     ctx.fillStyle = skin;
     ctx.beginPath();
@@ -195,7 +224,12 @@ const PaperDoll = (() => {
     ctx.quadraticCurveTo(-48, 280, -42, 220);
     ctx.closePath();
     ctx.fill();
+    // 手臂轮廓
+    ctx.strokeStyle = adjustColor(skin, -25);
+    ctx.lineWidth = 1;
+    ctx.stroke();
 
+    ctx.fillStyle = skin;
     ctx.beginPath();
     ctx.moveTo(40, 210);
     ctx.quadraticCurveTo(55, 220, 58, 280);
@@ -203,12 +237,26 @@ const PaperDoll = (() => {
     ctx.quadraticCurveTo(48, 280, 42, 220);
     ctx.closePath();
     ctx.fill();
+    ctx.strokeStyle = adjustColor(skin, -25);
+    ctx.stroke();
+
+    // 手
+    ctx.fillStyle = skin;
+    ctx.beginPath(); ctx.arc(-52, 290, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = adjustColor(skin, -20); ctx.stroke();
+    ctx.beginPath(); ctx.arc(52, 290, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.stroke();
   }
 
   function drawNeck(ctx, s) {
     const skin = PARTS.skinTones[s.skinTone] || PARTS.skinTones[0];
     ctx.fillStyle = skin;
-    ctx.fillRect(-10, 170, 20, 30);
+    // 脖子紧贴头部底部(y=146)，宽度与头匹配
+    ctx.fillRect(-12, 146, 24, 28);
+    // 脖子阴影
+    ctx.fillStyle = adjustColor(skin, -15);
+    ctx.fillRect(-12, 146, 4, 20);
+    ctx.fillRect(8, 146, 4, 20);
   }
 
   function drawHead(ctx, s) {
@@ -216,6 +264,16 @@ const PaperDoll = (() => {
     const face = PARTS.face[s.face];
     ctx.fillStyle = skin;
 
+    // 头部阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.beginPath();
+    if (face.shape === 'ellipse') {
+      ctx.ellipse(2, 122, face.rx + 2, face.ry + 2, 0, 0, Math.PI * 2);
+    }
+    ctx.fill();
+
+    // 头部
+    ctx.fillStyle = skin;
     ctx.beginPath();
     if (face.shape === 'ellipse') {
       ctx.ellipse(0, 120, face.rx, face.ry, 0, 0, Math.PI * 2);
@@ -234,13 +292,41 @@ const PaperDoll = (() => {
     }
     ctx.fill();
 
+    // 头部轮廓线
+    ctx.strokeStyle = adjustColor(skin, -30);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    if (face.shape === 'ellipse') {
+      ctx.ellipse(0, 120, face.rx, face.ry, 0, 0, Math.PI * 2);
+    } else if (face.shape === 'rect') {
+      roundRect(ctx, -face.w/2, 120 - face.h/2, face.w, face.h, face.r);
+    } else if (face.shape === 'diamond') {
+      ctx.moveTo(0, 120 - face.h/2);
+      ctx.lineTo(face.w/2, 120);
+      ctx.lineTo(0, 120 + face.h/2);
+      ctx.lineTo(-face.w/2, 120);
+      ctx.closePath();
+    } else if (face.shape === 'heart') {
+      ctx.moveTo(0, 120 + face.h/2);
+      ctx.bezierCurveTo(-face.w/2, 120 + face.h/4, -face.w/2, 120 - face.h/4, 0, 120 - face.h/3);
+      ctx.bezierCurveTo(face.w/2, 120 - face.h/4, face.w/2, 120 + face.h/4, 0, 120 + face.h/2);
+    }
+    ctx.stroke();
+
     // 耳朵
+    ctx.fillStyle = skin;
     ctx.beginPath();
     ctx.ellipse(-face.rx || -22, 120, 5, 8, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = adjustColor(skin, -25); ctx.lineWidth = 1; ctx.stroke();
     ctx.beginPath();
     ctx.ellipse((face.rx || 22), 120, 5, 8, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
+    // 耳朵内部
+    ctx.fillStyle = adjustColor(skin, -15);
+    ctx.beginPath(); ctx.ellipse(-face.rx || -22, 121, 3, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse((face.rx || 22), 121, 3, 5, 0, 0, Math.PI * 2); ctx.fill();
   }
 
   function drawHair(ctx, s) {
@@ -251,12 +337,9 @@ const PaperDoll = (() => {
 
     hair.paths.forEach(pathStr => {
       ctx.beginPath();
-      // 简易路径解析 - 将路径坐标偏移到头部中心(0, 120)
-      const adjustedPath = pathStr.replace(/(\d+)/g, (match, offset) => {
-        return match;
-      });
-      // 直接用SVG路径绘制（简化版，手动偏移）
-      drawAdjustedPath(ctx, pathStr, 0, 60);
+      // 头发路径坐标以(100, 70)为中心设计，需要偏移到头部中心(0, 120)
+      // ox = 0 - 100 = -100（修正偏右），oy = 120 - 70 = 50（对齐头顶）
+      drawAdjustedPath(ctx, pathStr, -100, 50);
       ctx.fill();
     });
   }
@@ -294,6 +377,23 @@ const PaperDoll = (() => {
     const expr = PARTS.expression[s.expr];
     const skin = PARTS.skinTones[s.skinTone] || PARTS.skinTones[0];
 
+    // 眉毛
+    ctx.strokeStyle = adjustColor(skin, -60);
+    ctx.lineWidth = 2;
+    if (expr.eyes === 'angry') {
+      ctx.beginPath(); ctx.moveTo(-16, 106); ctx.lineTo(-5, 109); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(16, 106); ctx.lineTo(5, 109); ctx.stroke();
+    } else if (expr.eyes === 'narrow') {
+      ctx.beginPath(); ctx.moveTo(-15, 108); ctx.lineTo(-5, 108); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(5, 108); ctx.lineTo(15, 108); ctx.stroke();
+    } else if (expr.eyes === 'wide') {
+      ctx.beginPath(); ctx.moveTo(-15, 105); ctx.quadraticCurveTo(-10, 102, -5, 105); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(5, 105); ctx.quadraticCurveTo(10, 102, 15, 105); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.moveTo(-15, 107); ctx.quadraticCurveTo(-10, 104, -5, 107); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(5, 107); ctx.quadraticCurveTo(10, 104, 15, 107); ctx.stroke();
+    }
+
     // 眼睛
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#1a1a1a';
@@ -307,6 +407,10 @@ const PaperDoll = (() => {
       ctx.fillStyle = '#2a1a0a';
       ctx.beginPath(); ctx.arc(-10, 115, 3, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(10, 115, 3, 0, Math.PI * 2); ctx.fill();
+      // 高光
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(-9, 114, 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(11, 114, 1.2, 0, Math.PI * 2); ctx.fill();
     } else if (expr.eyes === 'narrow') {
       ctx.beginPath(); ctx.moveTo(-16, 115); ctx.lineTo(-4, 115); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(4, 115); ctx.lineTo(16, 115); ctx.stroke();
@@ -319,11 +423,11 @@ const PaperDoll = (() => {
       ctx.fillStyle = '#2a1a0a';
       ctx.beginPath(); ctx.arc(-10, 116, 4, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(10, 116, 4, 0, Math.PI * 2); ctx.fill();
+      // 高光
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(-9, 114, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(11, 114, 1.5, 0, Math.PI * 2); ctx.fill();
     } else if (expr.eyes === 'angry') {
-      // 怒眉
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(-16, 108); ctx.lineTo(-5, 111); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(16, 108); ctx.lineTo(5, 111); ctx.stroke();
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.ellipse(-10, 115, 6, 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.beginPath(); ctx.ellipse(10, 115, 6, 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -337,9 +441,13 @@ const PaperDoll = (() => {
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, 118);
-    ctx.lineTo(-2, 126);
-    ctx.lineTo(2, 126);
+    ctx.lineTo(-3, 126);
+    ctx.lineTo(3, 126);
     ctx.stroke();
+    // 鼻翼
+    ctx.fillStyle = adjustColor(skin, -10);
+    ctx.beginPath(); ctx.ellipse(-3, 126, 2, 1.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(3, 126, 2, 1.5, 0, 0, Math.PI * 2); ctx.fill();
 
     // 嘴巴
     ctx.strokeStyle = '#8a4a3a';
@@ -348,12 +456,21 @@ const PaperDoll = (() => {
       ctx.beginPath(); ctx.moveTo(-6, 134); ctx.lineTo(6, 134); ctx.stroke();
     } else if (expr.mouth === 'smile') {
       ctx.beginPath(); ctx.moveTo(-7, 132); ctx.quadraticCurveTo(0, 140, 7, 132); ctx.stroke();
+      // 嘴唇上色
+      ctx.fillStyle = '#a05040';
+      ctx.beginPath(); ctx.moveTo(-6, 132); ctx.quadraticCurveTo(0, 138, 6, 132); ctx.quadraticCurveTo(0, 134, -6, 132); ctx.fill();
     } else if (expr.mouth === 'frown') {
       ctx.beginPath(); ctx.moveTo(-7, 136); ctx.quadraticCurveTo(0, 130, 7, 136); ctx.stroke();
     } else if (expr.mouth === 'o') {
       ctx.fillStyle = '#5a2a1a';
       ctx.beginPath(); ctx.ellipse(0, 134, 4, 5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#4a1a0a'; ctx.stroke();
     }
+
+    // 腮红
+    ctx.fillStyle = 'rgba(200,100,80,0.12)';
+    ctx.beginPath(); ctx.ellipse(-16, 124, 7, 4, -0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(16, 124, 7, 4, 0.2, 0, Math.PI * 2); ctx.fill();
   }
 
   function drawOutfitDetails(ctx, s) {
