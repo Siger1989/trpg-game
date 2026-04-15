@@ -13,6 +13,16 @@ const SceneManager = (() => {
   let cellSize = 2; // 每格世界单位大小
   let animating = false;
 
+  // ========== 绿色轨迹线 + 点击移动 ==========
+  let pathLine = null;           // THREE.Line 绿色路径
+  let pathTarget = null;         // {x, z} 目标格子（第一次点击设置，第二次点击执行）
+  let pathHighlight = null;      // 目标格子高亮mesh
+  let playerModel = null;        // GLB模型（monster.glb）
+  let playerMixer = null;        // AnimationMixer
+  let playerActions = {};        // 动作名→AnimationAction
+  let currentAction = 'idle';    // 当前播放的动作
+  let clock = null;              // THREE.Clock（init时创建）
+
   // ========== 场景模板定义 ==========
   const ROOM_TEMPLATES = {
     corridor: {
@@ -181,6 +191,9 @@ const SceneManager = (() => {
 
     // 创建玩家标记
     createPlayerMesh();
+
+    // Clock用于AnimationMixer
+    clock = new THREE.Clock();
 
     // 初始化物件标签叠加层
     initLabels(container);
@@ -729,6 +742,191 @@ const SceneManager = (() => {
     };
   }
 
+  // ========== 绿色轨迹线 + 点击移动 ==========
+
+  // BFS寻路：从start到end，返回格子路径数组[{x,z},...] 或null
+  function findPath(startX, startZ, endX, endZ) {
+    if (!currentRoom) return null;
+    const w = currentRoom.width, h = currentRoom.height;
+    // 起终点相同
+    if (startX === endX && startZ === endZ) return [{ x: startX, z: startZ }];
+    // 终点不可达
+    if (endX < 0 || endX >= w || endZ < 0 || endZ >= h) return null;
+    const blocking = sceneObjects.find(o => o.gridX === endX && o.gridZ === endZ && o.blockMove);
+    if (blocking) return null;
+
+    const visited = new Set();
+    const queue = [{ x: startX, z: startZ, path: [{ x: startX, z: startZ }] }];
+    visited.add(`${startX},${startZ}`);
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+
+    while (queue.length > 0) {
+      const cur = queue.shift();
+      for (const [dx, dz] of dirs) {
+        const nx = cur.x + dx, nz = cur.z + dz;
+        const key = `${nx},${nz}`;
+        if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+        if (visited.has(key)) continue;
+        const blk = sceneObjects.find(o => o.gridX === nx && o.gridZ === nz && o.blockMove);
+        if (blk) continue;
+        visited.add(key);
+        const newPath = [...cur.path, { x: nx, z: nz }];
+        if (nx === endX && nz === endZ) return newPath;
+        queue.push({ x: nx, z: nz, path: newPath });
+      }
+    }
+    return null; // 无路径
+  }
+
+  // 显示绿色轨迹线
+  function showPathLine(path) {
+    clearPathLine();
+    if (!path || path.length < 2 || !scene) return;
+
+    const points = path.map(p => {
+      const w = gridToWorld(p.x, p.z);
+      return new THREE.Vector3(w.x, 0.05, w.z); // 贴地
+    });
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({ color: 0x44ff66, linewidth: 2, transparent: true, opacity: 0.8 });
+    pathLine = new THREE.Line(geo, mat);
+    pathLine.name = 'pathLine';
+    scene.add(pathLine);
+
+    // 目标格子高亮
+    const endP = path[path.length - 1];
+    const endW = gridToWorld(endP.x, endP.z);
+    const hlGeo = new THREE.RingGeometry(0.3, 0.55, 16);
+    const hlMat = new THREE.MeshBasicMaterial({ color: 0x44ff66, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+    pathHighlight = new THREE.Mesh(hlGeo, hlMat);
+    pathHighlight.rotation.x = -Math.PI / 2;
+    pathHighlight.position.set(endW.x, 0.06, endW.z);
+    scene.add(pathHighlight);
+  }
+
+  // 清除轨迹线
+  function clearPathLine() {
+    if (pathLine && scene) { scene.remove(pathLine); pathLine.geometry.dispose(); pathLine.material.dispose(); pathLine = null; }
+    if (pathHighlight && scene) { scene.remove(pathHighlight); pathHighlight.geometry.dispose(); pathHighlight.material.dispose(); pathHighlight = null; }
+    pathTarget = null;
+  }
+
+  // 沿路径移动（逐格动画）
+  function moveAlongPath(path, callback) {
+    if (!path || path.length < 2) { if (callback) callback(); return; }
+    animating = true;
+    let step = 1; // 从第1格开始（第0格是当前位置）
+    function nextStep() {
+      if (step >= path.length) {
+        animating = false;
+        clearPathLine();
+        if (callback) callback();
+        return;
+      }
+      const target = path[step];
+      playerPos.x = target.x;
+      playerPos.z = target.z;
+      const worldTarget = gridToWorld(target.x, target.z);
+      const start = playerMesh.position.clone();
+      const duration = 150;
+      const startTime = performance.now();
+      // 播放走路动作
+      playAction('walk');
+      function anim(now) {
+        const t = Math.min(1, (now - startTime) / duration);
+        const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        playerMesh.position.x = start.x + (worldTarget.x - start.x) * ease;
+        playerMesh.position.z = start.z + (worldTarget.z - start.z) * ease;
+        if (t < 1) {
+          requestAnimationFrame(anim);
+        } else {
+          step++;
+          nextStep();
+        }
+      }
+      requestAnimationFrame(anim);
+    }
+    nextStep();
+  }
+
+  // 点击格子：第一次显示路径，第二次执行移动
+  function clickGrid(gx, gz) {
+    if (animating || !currentRoom) return 'busy';
+    const pp = getPlayerPos();
+    // 点击自己位置：取消路径
+    if (gx === pp.x && gz === pp.z) { clearPathLine(); return 'cancel'; }
+    // 如果已有路径目标且点击同一格：执行移动
+    if (pathTarget && pathTarget.x === gx && pathTarget.z === gz) {
+      const path = findPath(pp.x, pp.z, gx, gz);
+      if (path) { moveAlongPath(path); return 'move'; }
+      return 'blocked';
+    }
+    // 第一次点击：显示路径
+    const path = findPath(pp.x, pp.z, gx, gz);
+    if (!path) return 'blocked';
+    pathTarget = { x: gx, z: gz };
+    showPathLine(path);
+    return 'preview';
+  }
+
+  // ========== GLB模型加载 ==========
+
+  // 加载monster.glb替换主角
+  function loadPlayerModel(url) {
+    if (!window._gltfLoaderReady) {
+      // GLTFLoader还没加载完，等一下
+      window.addEventListener('gltf-loader-ready', () => loadPlayerModel(url), { once: true });
+      return;
+    }
+    const loader = new THREE.GLTFLoader();
+    loader.load(url, (gltf) => {
+      const model = gltf.scene;
+      // 缩放适配格子大小
+      model.scale.set(0.5, 0.5, 0.5);
+      // 如果有动画
+      if (gltf.animations && gltf.animations.length > 0) {
+        playerMixer = new THREE.AnimationMixer(model);
+        gltf.animations.forEach(clip => {
+          const action = playerMixer.clipAction(clip);
+          playerActions[clip.name.toLowerCase()] = action;
+        });
+        // 默认播放idle或第一个动画
+        playAction('idle') || playAction(Object.keys(playerActions)[0]);
+      }
+      // 替换旧模型
+      if (playerMesh && scene) scene.remove(playerMesh);
+      playerModel = model;
+      // 保留底部圆环
+      const group = new THREE.Group();
+      group.add(model);
+      // 底部圆环指示器
+      const ringGeo = new THREE.RingGeometry(0.35, 0.45, 16);
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0xc9a04e, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.05;
+      group.add(ring);
+      playerMesh = group;
+      scene.add(playerMesh);
+      updatePlayerWorldPos();
+    }, undefined, (err) => {
+      console.warn('GLB模型加载失败，使用默认模型:', err);
+    });
+  }
+
+  // 播放动作
+  function playAction(name) {
+    if (!playerMixer || !playerActions[name]) return false;
+    const action = playerActions[name];
+    if (currentAction === name) return true;
+    // 淡出旧动作
+    const oldAction = playerActions[currentAction];
+    if (oldAction && oldAction !== action) oldAction.fadeOut(0.3);
+    action.reset().fadeIn(0.3).play();
+    currentAction = name;
+    return true;
+  }
+
   // ========== 玩家移动 ==========
   function movePlayer(dx, dz) {
     if (animating || !currentRoom) return false;
@@ -847,6 +1045,12 @@ const SceneManager = (() => {
   // ========== 渲染循环 ==========
   function animate() {
     requestAnimationFrame(animate);
+
+    // AnimationMixer更新（GLB模型动画）
+    if (playerMixer) {
+      const delta = clock.getDelta ? clock.getDelta() : 1/60;
+      playerMixer.update(delta);
+    }
 
     // 相机控制器更新（惯性等）
     if (controls) {
@@ -1243,7 +1447,7 @@ const SceneManager = (() => {
 
   return {
     init, buildRoom, clearRoom,
-    movePlayer, getPlayerPos,
+    movePlayer, movePlayerToGrid, getPlayerPos,
     getObjectAt, getRoomInfo,
     hasLineOfSight, gridDistance,
     gridToWorld, worldToGrid,
@@ -1253,6 +1457,7 @@ const SceneManager = (() => {
     placeObject, removeObjectAt, getInteractableObjects,
     centerCameraOnRoom, setObjectInteractionHandler,
     toggleObjectLight, toggleDoor, highlightObject,
-    canInteract, getInteractDistance, INTERACT_RANGE
+    canInteract, getInteractDistance, INTERACT_RANGE,
+    showPathPreview, clearPathPreview, loadPlayerModel
   };
 })();
