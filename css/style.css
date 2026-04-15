@@ -1011,6 +1011,7 @@ html, body {
   #screen-game {
     display: flex;
     flex-direction: column;
+    position: relative;
   }
 
   /* 3D场景容器：竖屏时占上半部分 */
@@ -1023,22 +1024,20 @@ html, body {
     flex-shrink: 0;
   }
 
-  /* HUD覆盖层改为流式布局，下半部分 */
+  /* HUD覆盖层：恢复absolute覆盖整个screen-game，这样hud-top可以浮在3D场景上 */
   #game-hud {
-    position: relative !important;
-    inset: auto !important;
-    flex: 1;
+    position: absolute !important;
+    inset: 0 !important;
     display: flex;
     flex-direction: column;
-    pointer-events: auto;
-    min-height: 0;
+    pointer-events: none;
+    z-index: 10;
   }
   #game-hud > * { pointer-events: auto; }
 
-  /* 顶部状态栏：覆盖在3D场景上方 */
+  /* 顶部状态栏：绝对定位在3D场景上方（absolute跟随screen-game，主菜单时screen-game隐藏则不显示） */
   .hud-top {
-    order: -1;
-    position: fixed;
+    position: absolute;
     top: 0;
     left: 0;
     right: 0;
@@ -1055,9 +1054,9 @@ html, body {
   /* 中间区域：竖屏不需要 */
   .hud-middle { display: none; }
 
-  /* 快捷行动栏：竖屏时视觉合并到叙事面板顶部 */
+  /* 快捷行动栏：竖屏时视觉合并到叙事面板顶部，推到屏幕下半部分 */
   .hud-actions {
-    order: 3;
+    margin-top: 40vh;
     padding: 4px 10px 2px 10px;
     gap: 4px;
     flex-wrap: nowrap;
@@ -1067,7 +1066,6 @@ html, body {
     background: rgba(10,10,15,0.92);
     border-bottom: 1px solid var(--border);
     border-top: none;
-    margin: 0;
   }
   .action-btn {
     padding: 5px 8px;
@@ -1078,7 +1076,6 @@ html, body {
 
   /* 叙事面板：竖屏时紧跟动作栏，视觉一体 */
   .hud-narrative {
-    order: 4;
     flex: 1;
     min-height: 0;
     max-height: none;
