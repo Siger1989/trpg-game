@@ -1043,21 +1043,36 @@ html, body {
     border-top: 1px solid var(--border);
   }
 
-  /* 顶部状态栏：浮在3D场景上方 */
+  /* 顶部状态栏：浮在屏幕左上角（3D场景区域）
+     用fixed定位，配合#screen-game.active控制显隐 */
   .hud-top {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
-    right: 0;
     z-index: 50;
     padding: 6px 10px;
     background: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent);
     flex-shrink: 0;
+    max-width: 60%;
+    pointer-events: auto;
+    display: none; /* 默认隐藏 */
+  }
+  /* 只有游戏界面激活时才显示状态栏 */
+  #screen-game.active .hud-top {
+    display: flex;
   }
   .char-status { gap: 6px; }
   #hud-portrait { width: 36px; height: 36px; }
   .bar { width: 80px; height: 12px; }
-  .hud-location { font-size: 0.8em; padding: 3px 8px; }
+  /* 位置标签：紧贴状态栏下方，也浮在3D场景上 */
+  .hud-location {
+    font-size: 0.75em;
+    padding: 2px 8px;
+    margin-top: 2px;
+    background: rgba(0,0,0,0.6);
+    border-radius: 4px;
+    display: inline-block;
+  }
 
   /* 中间区域：竖屏不需要 */
   .hud-middle { display: none; }
