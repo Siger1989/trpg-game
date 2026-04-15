@@ -114,7 +114,8 @@ const CameraControls = (() => {
       const dy = e.touches[0].clientY - lastMouse.y;
       lastMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       spherical.theta -= dx * 0.005;
-      spherical.phi = Math.max(minPhi, Math.min(maxPhi, spherical.phi + dy * 0.005));
+      // 反转dy方向：向上滑动时场景向上转（相机向下看，phi增大）
+      spherical.phi = Math.max(minPhi, Math.min(maxPhi, spherical.phi - dy * 0.005));
     } else if (e.touches.length === 2) {
       const dist = getTouchDist(e.touches);
       const center = getTouchCenter(e.touches);

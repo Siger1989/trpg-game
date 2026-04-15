@@ -235,21 +235,36 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function startGame(isContinue) {
     UI.showScreen('game');
-    if (!isContinue) DMEngine.initWorld('old_house');
-    requestAnimationFrame(() => {
-      try {
-        if (!sceneInitialized) {
-          const c = document.getElementById('scene-container');
-          if (!c || !c.clientWidth || !c.clientHeight) {
-            setTimeout(() => startGame(isContinue), 100);
-            return;
+    if (!isContinue) {
+      // 调用 generateScenarioFromSurvey 生成剧本
+      DMEngine.generateScenarioFromSurvey(null).then(scenario => {
+        DMEngine.initWorldWithScenario(scenario);
+        startGameInternal();
+      }).catch(err => {
+        console.error('生成剧本失败，使用默认剧本:', err);
+        DMEngine.initWorld('old_house');
+        startGameInternal();
+      });
+    } else {
+      startGameInternal();
+    }
+    
+    function startGameInternal() {
+      requestAnimationFrame(() => {
+        try {
+          if (!sceneInitialized) {
+            const c = document.getElementById('scene-container');
+            if (!c || !c.clientWidth || !c.clientHeight) {
+              setTimeout(() => startGame(isContinue), 100);
+              return;
+            }
+            SceneManager.init(c);
+            sceneInitialized = true;
           }
-          SceneManager.init(c);
-          sceneInitialized = true;
-        }
-        finishStartGame();
-      } catch(e) { console.error(e); finishStartGame(); }
-    });
+          finishStartGame();
+        } catch(e) { console.error(e); finishStartGame(); }
+      });
+    }
   }
   function finishStartGame() {
     try { loadCurrentScene(); } catch(e) {}
@@ -482,17 +497,34 @@ document.addEventListener('DOMContentLoaded', () => {
     if(!DMEngine.consumeAP(1)){UI.addNarration('行动点数不足！请结束回合。','system');return;}
 
     if(typeof AIDM!=='undefined' && AIDM.isConfigured()){
-      UI.addNarration('🔮...','system');
+      UI.addNarration('🔮 AI思考中...','system');
       try{
         const ctx = { history: DMEngine.getHistory().slice(-10), scene: DMEngine.getCurrentScene(), player: GameState.getPlayer() };
         const aiResult = await AIDM.generateNarration(text, ctx);
         const nt = document.getElementById('narrative-text'); const last = nt?.lastElementChild; if(last?.textContent.includes('🔮')) last.remove();
-        if(aiResult){ UI.addNarration(aiResult.narration,'dm'); if(aiResult.choices?.length>0) showChoices(aiResult.choices); UI.updateHUD(); GameState.saveGame(); return; }
-      }catch(err){console.warn('AI failed:',err);const nt=document.getElementById('narrative-text');const last=nt?.lastElementChild;if(last?.textContent.includes('🔮'))last.remove();}
+        if(aiResult && aiResult.narration){ 
+          UI.addNarration(aiResult.narration,'dm'); 
+          if(aiResult.choices?.length>0) showChoices(aiResult.choices); 
+          UI.updateHUD(); GameState.saveGame(); 
+          return; 
+        }
+        console.warn('[Game] AI返回为空，使用降级叙事');
+      }catch(err){
+        console.warn('[Game] AI调用失败:', err);
+        const nt=document.getElementById('narrative-text');
+        const last=nt?.lastElementChild;
+        if(last?.textContent.includes('🔮'))last.remove();
+      }
+    } else {
+      console.log('[Game] AI未配置，使用降级叙事');
     }
 
     const result = await DMEngine.processFreeInput(text);
-    UI.addNarration(result.narration,'dm');
+    if(!result || !result.narration){
+      UI.addNarration('你做了一些事情，但似乎没有什么特别的事情发生...','system');
+    } else {
+      UI.addNarration(result.narration,'dm');
+    }
     if(result.choices) showChoices(result.choices);
     if(result.combat&&result.enemies) setTimeout(()=>CombatSystem.startCombat(result.enemies),500);
     GameState.saveGame(); UI.updateHUD();

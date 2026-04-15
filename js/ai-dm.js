@@ -62,9 +62,13 @@ const AIDM = (() => {
 
   // ========== API调用 ==========
   async function chat(messages) {
-    if (!isConfigured()) return null;
+    if (!isConfigured()) {
+      console.warn('[AIDM] 未配置API，跳过AI调用');
+      return null;
+    }
 
     try {
+      console.log('[AIDM] 开始调用API:', config.apiUrl);
       const headers = {
         'Content-Type': 'application/json',
       };
@@ -98,11 +102,12 @@ const AIDM = (() => {
       });
 
       if (!response.ok) {
-        console.error('AI API error:', response.status, await response.text());
+        console.error('[AIDM] API错误:', response.status, await response.text());
         return null;
       }
 
       const data = await response.json();
+      console.log('[AIDM] API响应成功');
 
       // OpenAI兼容格式
       if (data.choices && data.choices[0]) {
@@ -119,9 +124,10 @@ const AIDM = (() => {
         return content || null;
       }
 
+      console.warn('[AIDM] 无法解析API响应格式');
       return null;
     } catch (err) {
-      console.error('AI DM call failed:', err);
+      console.error('[AIDM] API调用失败:', err);
       return null;
     }
   }
@@ -185,6 +191,14 @@ const AIDM = (() => {
 
   // ========== 初始化 ==========
   loadConfig();
+  
+  // 启动时打印配置状态，便于调试
+  console.log('[AIDM] 初始化完成，配置状态:', { 
+    provider: config.provider, 
+    hasApiKey: !!config.apiKey, 
+    apiUrl: config.apiUrl,
+    isConfigured: isConfigured()
+  });
 
   return {
     chat, generateNarration, generateScenario,

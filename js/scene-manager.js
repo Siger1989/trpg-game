@@ -22,6 +22,10 @@ const SceneManager = (() => {
   let playerActions = {};        // 动作名→AnimationAction
   let currentAction = 'idle';    // 当前播放的动作
   let clock = null;              // THREE.Clock（init时创建）
+  
+  // 灯光系统引用（init和applyAtmosphere中赋值）
+  let ambientLightBase = null;   // 基础环境光引用
+  let hemiLightBase = null;      // 基础半球光引用
 
   // ========== 场景模板定义 ==========
   const ROOM_TEMPLATES = {
@@ -176,13 +180,13 @@ const SceneManager = (() => {
       }
     });
 
-    // 环境光（极低基础照明，让灯光成为关键光源）
-    const ambient = new THREE.AmbientLight(0x8888aa, 0.3);
+    // 环境光（适度基础照明，保证场景可见）
+    const ambient = new THREE.AmbientLight(0x8888aa, 0.6);
     scene.add(ambient);
     ambientLightBase = ambient; // 保存引用，开灯时动态调整
 
-    // 半球光补充微弱环境（天空冷光+地面暗光）
-    const hemiLight = new THREE.HemisphereLight(0x6666aa, 0x222233, 0.2);
+    // 半球光补充环境（天空冷光+地面暗光）
+    const hemiLight = new THREE.HemisphereLight(0x6666aa, 0x222233, 0.5);
     scene.add(hemiLight);
     hemiLightBase = hemiLight; // 保存引用
 
@@ -252,10 +256,10 @@ const SceneManager = (() => {
     const floorGeo = new THREE.PlaneGeometry(combatW * cellSize, combatH * cellSize);
     const floorMat = new THREE.MeshStandardMaterial({
       color: tpl.floorColor,
-      roughness: 0.7,
-      metalness: 0.1,
+      roughness: 0.8,
+      metalness: 0.05,
       emissive: tpl.floorColor,
-      emissiveIntensity: 0.02
+      emissiveIntensity: 0.15  // 提高自发光，让地板在暗光下也可见
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
@@ -340,7 +344,7 @@ const SceneManager = (() => {
   function buildWalls(w, h, wallH, color) {
     const halfW = (w * cellSize) / 2;
     const halfH = (h * cellSize) / 2;
-    const wallMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.05, emissive: color, emissiveIntensity: 0.02 });
+    const wallMat = new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.02, emissive: color, emissiveIntensity: 0.15 });  // 提高自发光
 
     // 四面墙
     const walls = [
@@ -363,13 +367,13 @@ const SceneManager = (() => {
   }
 
   function applyAtmosphere(atm) {
-    // 雾（暗色，密度较高营造黑暗氛围）
-    scene.fog = new THREE.FogExp2(0x0a0a14, Math.max(atm.fogDensity || 0.02, 0.015));
+    // 雾（适度密度，营造氛围但保证视野）
+    scene.fog = new THREE.FogExp2(0x0a0a14, Math.max(atm.fogDensity || 0.015, 0.010));
 
-    // 主光源（模拟房间顶灯/窗光，低强度，让物件灯光成为焦点）
+    // 主光源（模拟房间顶灯/窗光，适度强度）
     mainLightRef = new THREE.PointLight(
       atm.lightColor || 0xffeedd,
-      Math.min(atm.lightIntensity || 1.0, 2.0),
+      Math.min(atm.lightIntensity || 1.0, 2.0) * 2.0,  // 提高强度以确保可见
       atm.lightRange || 30
     );
     mainLightRef.position.set(0, (atm.wallHeight || 3) - 0.5, 0);
@@ -379,8 +383,8 @@ const SceneManager = (() => {
     scene.add(mainLightRef);
     gridObjects.push(mainLightRef);
 
-    // 环境光（极低，只保证不完全漆黑）
-    ambientLightRef = new THREE.AmbientLight(0x8888aa, Math.min(atm.ambientIntensity || 0.3, 0.8));
+    // 环境光（适度照明）
+    ambientLightRef = new THREE.AmbientLight(0x8888aa, Math.min(atm.ambientIntensity || 0.3, 0.8) * 2.0);
     scene.add(ambientLightRef);
     gridObjects.push(ambientLightRef);
   }
@@ -788,16 +792,44 @@ const SceneManager = (() => {
       return new THREE.Vector3(w.x, 0.05, w.z); // 贴地
     });
     const geo = new THREE.BufferGeometry().setFromPoints(points);
-    const mat = new THREE.LineBasicMaterial({ color: 0x44ff66, linewidth: 2, transparent: true, opacity: 0.8 });
+    // 增强绿色轨迹线亮度和宽度
+    const mat = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 3, transparent: true, opacity: 1.0 });
     pathLine = new THREE.Line(geo, mat);
     pathLine.name = 'pathLine';
     scene.add(pathLine);
 
-    // 目标格子高亮
+    // 目标格子高亮（绿色发光环）
     const endP = path[path.length - 1];
     const endW = gridToWorld(endP.x, endP.z);
-    const hlGeo = new THREE.RingGeometry(0.3, 0.55, 16);
-    const hlMat = new THREE.MeshBasicMaterial({ color: 0x44ff66, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+    const hlGeo = new THREE.RingGeometry(0.3, 0.6, 16);
+    const hlMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide, transparent: true, opacity: 1.0 });
+    pathHighlight = new THREE.Mesh(hlGeo, hlMat);
+    pathHighlight.rotation.x = -Math.PI / 2;
+    pathHighlight.position.set(endW.x, 0.06, endW.z);
+    scene.add(pathHighlight);
+  }
+
+  // 显示红色轨迹线（AP不足）
+  function showRedPathLine(path) {
+    clearPathLine();
+    if (!path || path.length < 2 || !scene) return;
+
+    const points = path.map(p => {
+      const w = gridToWorld(p.x, p.z);
+      return new THREE.Vector3(w.x, 0.05, w.z); // 贴地
+    });
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    // 红色轨迹线
+    const mat = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 3, transparent: true, opacity: 1.0 });
+    pathLine = new THREE.Line(geo, mat);
+    pathLine.name = 'pathLine';
+    scene.add(pathLine);
+
+    // 目标格子高亮（红色发光环）
+    const endP = path[path.length - 1];
+    const endW = gridToWorld(endP.x, endP.z);
+    const hlGeo = new THREE.RingGeometry(0.3, 0.6, 16);
+    const hlMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 1.0 });
     pathHighlight = new THREE.Mesh(hlGeo, hlMat);
     pathHighlight.rotation.x = -Math.PI / 2;
     pathHighlight.position.set(endW.x, 0.06, endW.z);
@@ -816,6 +848,11 @@ const SceneManager = (() => {
     if (!path || path.length < 2) { if (callback) callback(); return; }
     animating = true;
     let step = 1; // 从第1格开始（第0格是当前位置）
+    const cost = path.length - 1; // 移动步数
+    // 扣除AP
+    if (typeof DMEngine !== 'undefined' && DMEngine.consumeAP) {
+      DMEngine.consumeAP(cost);
+    }
     function nextStep() {
       if (step >= path.length) {
         animating = false;
@@ -864,9 +901,18 @@ const SceneManager = (() => {
     // 第一次点击：显示路径
     const path = findPath(pp.x, pp.z, gx, gz);
     if (!path) return 'blocked';
-    pathTarget = { x: gx, z: gz };
-    showPathLine(path);
-    return 'preview';
+    
+    // 检查AP是否足够（每格消耗1 AP）
+    const ap = typeof DMEngine !== 'undefined' ? DMEngine.getAP() : { current: 999, max: 999 };
+    const cost = path.length - 1; // 移动步数
+    if (ap.current >= cost) {
+      pathTarget = { x: gx, z: gz };
+      showPathLine(path);
+      return 'preview';
+    } else {
+      showRedPathLine(path);
+      return 'blocked';
+    }
   }
 
   // ========== GLB模型加载 ==========
@@ -969,11 +1015,46 @@ const SceneManager = (() => {
     playerMesh.position.copy(pos);
   }
 
+  // 移动到指定格子（英雄无敌式）
+  function movePlayerToGrid(gx, gz) {
+    if (animating || !currentRoom) return false;
+    
+    // 边界检查
+    if (gx < 0 || gx >= currentRoom.width || gz < 0 || gz >= currentRoom.height) return false;
+    
+    // 阻挡检查
+    const blocking = sceneObjects.find(o => o.gridX === gx && o.gridZ === gz && o.blockMove);
+    if (blocking) return false;
+    
+    playerPos.x = gx;
+    playerPos.z = gz;
+    
+    // 平滑移动动画
+    animating = true;
+    const target = gridToWorld(gx, gz);
+    const start = playerMesh.position.clone();
+    const duration = 200;
+    const startTime = performance.now();
+    
+    function animateMove(now) {
+      const t = Math.min(1, (now - startTime) / duration);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      playerMesh.position.x = start.x + (target.x - start.x) * ease;
+      playerMesh.position.z = start.z + (target.z - start.z) * ease;
+      if (t < 1) {
+        requestAnimationFrame(animateMove);
+      } else {
+        animating = false;
+      }
+    }
+    requestAnimationFrame(animateMove);
+    
+    return true;
+  }
+
   // ========== 场景联动方法（叙事→3D效果） ==========
   let mainLightRef = null;   // 主光源引用
   let ambientLightRef = null; // 环境光引用（applyAtmosphere创建的）
-  let ambientLightBase = null; // 基础环境光引用（init创建的）
-  let hemiLightBase = null;   // 基础半球光引用
   let flickerTimer = null;
 
   // 灯光闪烁效果
@@ -1455,6 +1536,6 @@ const SceneManager = (() => {
     centerCameraOnRoom, setObjectInteractionHandler,
     toggleObjectLight, toggleDoor, highlightObject,
     canInteract, getInteractDistance, INTERACT_RANGE,
-    showPathPreview, clearPathPreview, loadPlayerModel
+    showPathLine, clearPathLine, loadPlayerModel, clickGrid
   };
 })();
