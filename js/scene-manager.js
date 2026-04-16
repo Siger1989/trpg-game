@@ -1214,17 +1214,19 @@ const SceneManager = (() => {
       const model = gltf.scene;
       
       // 修复贴图：GLB有贴图但材质没引用时，给材质设默认颜色
-      model.traverse(child => {
-        if (child.isMesh && child.material) {
-          const mats = Array.isArray(child.material) ? child.material : [child.material];
-          mats.forEach(mat => {
-            if (!mat.map && (!mat.color || (mat.color.r >= 0.9 && mat.color.g >= 0.9 && mat.color.b >= 0.9))) {
-              mat.color = new THREE.Color(0xc9a04e); // 金色
-              mat.needsUpdate = true;
-            }
-          });
-        }
-      });
+      try {
+        model.traverse(child => {
+          if (child.isMesh && child.material) {
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach(mat => {
+              if (!mat.map && (!mat.color || (mat.color.r >= 0.9 && mat.color.g >= 0.9 && mat.color.b >= 0.9))) {
+                mat.color = new THREE.Color(0xc9a04e); // 金色
+                mat.needsUpdate = true;
+              }
+            });
+          }
+        });
+      } catch(e) { console.warn('[SceneManager] 贴图修复失败:', e); }
       
       // 根据模型包围盒自动缩放，使其高度约为1.5格
       const box = new THREE.Box3().setFromObject(model);

@@ -328,31 +328,12 @@
 
         const model = gltf.scene;
         
-        // 修复贴图：GLB有贴图但材质没引用时，手动绑定
-        if (gltf.textures && gltf.textures.length > 0) {
-          let fixedCount = 0;
+        // 修复贴图：没贴图的材质设默认颜色
+        try {
           model.traverse(child => {
             if (child.isMesh && child.material) {
               const mats = Array.isArray(child.material) ? child.material : [child.material];
               mats.forEach(mat => {
-                if (!mat.map) {
-                  // 尝试从gltf.textures获取
-                  for (let i = 0; i < gltf.textures.length; i++) {
-                    const tex = gltf.textures[i];
-                    if (tex && tex.source !== undefined && gltf.images && gltf.images[tex.source]) {
-                      const img = gltf.images[tex.source];
-                      if (img && img.uri) {
-                        // 外部URI纹理
-                        const loader2 = new THREE.TextureLoader();
-                        mat.map = loader2.load(img.uri);
-                        mat.needsUpdate = true;
-                        fixedCount++;
-                        break;
-                      }
-                    }
-                  }
-                }
-                // 没贴图也没颜色 → 金色默认
                 if (!mat.map && (!mat.color || (mat.color.r >= 0.9 && mat.color.g >= 0.9 && mat.color.b >= 0.9))) {
                   mat.color = new THREE.Color(0xc9a04e);
                   mat.needsUpdate = true;
@@ -360,8 +341,7 @@
               });
             }
           });
-          console.log('[Preview] 贴图修复: 绑定了' + fixedCount + '个贴图');
-        }
+        } catch(e) { console.warn('[Preview] 贴图修复失败:', e); }
         
         // 根据模型包围盒自动缩放到合适尺寸（目标高度1.5）
         const box = new THREE.Box3().setFromObject(model);
