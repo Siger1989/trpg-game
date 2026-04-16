@@ -769,32 +769,26 @@ const SceneManager = (() => {
     let mesh;
     switch (objDef.type) {
       case 'table':
-        mesh = createBox(1.6, 0.8, 0.9, tpl.color);
-        mesh.position.y = 0.45;
+        mesh = createDetailedTable(tpl.color);
         break;
       case 'chair':
-        mesh = createBox(0.5, 0.9, 0.5, tpl.color);
-        mesh.position.y = 0.45;
+        mesh = createDetailedChair(tpl.color);
         break;
       case 'bookshelf':
-        mesh = createBox(1.2, 2.2, 0.5, tpl.color);
-        mesh.position.y = 1.1;
+        mesh = createDetailedBookshelf(tpl.color);
         break;
       case 'pillar':
         mesh = createCylinder(0.4, currentRoom.wallHeight, tpl.color);
         mesh.position.y = currentRoom.wallHeight / 2;
         break;
       case 'crate':
-        mesh = createBox(0.8, 0.8, 0.8, tpl.color);
-        mesh.position.y = 0.4;
+        mesh = createDetailedCrate(tpl.color);
         break;
       case 'barrel':
-        mesh = createCylinder(0.4, 0.9, tpl.color);
-        mesh.position.y = 0.45;
+        mesh = createDetailedBarrel(tpl.color);
         break;
       case 'altar':
-        mesh = createBox(1.4, 0.9, 0.9, tpl.color);
-        mesh.position.y = 0.45;
+        mesh = createDetailedAltar(tpl.color);
         break;
       case 'lamp':
         mesh = createCylinder(0.1, 0.3, tpl.color);
@@ -834,12 +828,7 @@ const SceneManager = (() => {
         group.add(candleGlow);
         break;
       case 'statue':
-        mesh = createCylinder(0.3, 1.8, tpl.color);
-        mesh.position.y = 0.9;
-        const head = new THREE.SphereGeometry(0.25, 6, 4);
-        const headMesh = new THREE.Mesh(head, new THREE.MeshStandardMaterial({ color: tpl.color, roughness: 0.8 }));
-        headMesh.position.y = 1.95;
-        group.add(headMesh);
+        mesh = createDetailedStatue(tpl.color);
         break;
       case 'rug':
         mesh = createBox(2.0, 0.02, 1.5, tpl.color);
@@ -850,20 +839,16 @@ const SceneManager = (() => {
         mesh.position.y = 2.0;
         break;
       case 'desk':
-        mesh = createBox(1.4, 0.75, 0.7, tpl.color);
-        mesh.position.y = 0.375;
+        mesh = createDetailedDesk(tpl.color);
         break;
       case 'bed':
-        mesh = createBox(1.8, 0.5, 2.0, tpl.color);
-        mesh.position.y = 0.25;
+        mesh = createDetailedBed(tpl.color);
         break;
       case 'wardrobe':
-        mesh = createBox(1.0, 2.0, 0.6, tpl.color);
-        mesh.position.y = 1.0;
+        mesh = createDetailedWardrobe(tpl.color);
         break;
       case 'fireplace':
-        mesh = createBox(1.4, 1.2, 0.5, tpl.color);
-        mesh.position.y = 0.6;
+        mesh = createDetailedFireplace(tpl.color);
         // 壁炉光源（初始关闭）— 大范围暖光
         const fireLight = new THREE.PointLight(0xff6622, 0, 22);
         fireLight.position.y = 1.0;
@@ -882,12 +867,7 @@ const SceneManager = (() => {
         group.add(fireGlow);
         break;
       case 'chest':
-        mesh = createBox(0.9, 0.6, 0.6, tpl.color);
-        mesh.position.y = 0.3;
-        // 箱盖
-        const lid = createBox(0.9, 0.1, 0.6, 0x7a5a2a);
-        lid.position.y = 0.55;
-        group.add(lid);
+        mesh = createDetailedChest(tpl.color);
         break;
       case 'skeleton':
         // 骨盆
@@ -926,8 +906,15 @@ const SceneManager = (() => {
     }
 
     if (mesh) {
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      // 精细模型是Group，简单模型是Mesh
+      if (mesh.isGroup) {
+        mesh.traverse(child => {
+          if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+        });
+      } else {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      }
       group.add(mesh);
     }
 
@@ -1002,6 +989,397 @@ const SceneManager = (() => {
     const geo = new THREE.CylinderGeometry(r, r, h, 8);
     const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.1 });
     return new THREE.Mesh(geo, mat);
+  }
+
+  // ========== 程序化家具纹理 ==========
+  const _texCache = {};
+  function getProceduralTexture(key, w, h, drawFn) {
+    if (_texCache[key]) return _texCache[key];
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    drawFn(ctx, w, h);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    _texCache[key] = tex;
+    return tex;
+  }
+
+  // 木纹纹理
+  function woodTexture(baseR, baseG, baseB, seed) {
+    return getProceduralTexture(`wood_${baseR}_${baseG}_${baseB}_${seed}`, 128, 128, (ctx, w, h) => {
+      ctx.fillStyle = `rgb(${baseR},${baseG},${baseB})`;
+      ctx.fillRect(0, 0, w, h);
+      // 木纹线条
+      const rng = mulberry32(seed || 42);
+      for (let i = 0; i < 20; i++) {
+        const y = rng() * h;
+        const alpha = 0.1 + rng() * 0.15;
+        ctx.strokeStyle = `rgba(0,0,0,${alpha})`;
+        ctx.lineWidth = 0.5 + rng() * 1.5;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        for (let x = 0; x < w; x += 8) {
+          ctx.lineTo(x, y + (rng() - 0.5) * 3);
+        }
+        ctx.stroke();
+      }
+      // 木节
+      for (let i = 0; i < 2; i++) {
+        const kx = 20 + rng() * (w - 40);
+        const ky = 20 + rng() * (h - 40);
+        ctx.beginPath();
+        ctx.ellipse(kx, ky, 4 + rng() * 4, 2 + rng() * 3, rng() * Math.PI, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(0,0,0,0.2)`;
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+    });
+  }
+
+  // 金属纹理
+  function metalTexture(baseR, baseG, baseB) {
+    return getProceduralTexture(`metal_${baseR}_${baseG}_${baseB}`, 64, 64, (ctx, w, h) => {
+      ctx.fillStyle = `rgb(${baseR},${baseG},${baseB})`;
+      ctx.fillRect(0, 0, w, h);
+      const rng = mulberry32(7);
+      for (let i = 0; i < 30; i++) {
+        const x = rng() * w;
+        const y = rng() * h;
+        ctx.strokeStyle = `rgba(255,255,255,${0.05 + rng() * 0.1})`;
+        ctx.lineWidth = 0.3;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + rng() * 20, y + (rng() - 0.5) * 4);
+        ctx.stroke();
+      }
+    });
+  }
+
+  // 石头纹理
+  function stoneTexture(baseR, baseG, baseB, seed) {
+    return getProceduralTexture(`stone_${baseR}_${baseG}_${baseB}_${seed}`, 128, 128, (ctx, w, h) => {
+      ctx.fillStyle = `rgb(${baseR},${baseG},${baseB})`;
+      ctx.fillRect(0, 0, w, h);
+      const rng = mulberry32(seed || 99);
+      for (let i = 0; i < 40; i++) {
+        const x = rng() * w;
+        const y = rng() * h;
+        const s = 1 + rng() * 3;
+        ctx.fillStyle = `rgba(0,0,0,${0.05 + rng() * 0.1})`;
+        ctx.fillRect(x, y, s, s);
+      }
+      for (let i = 0; i < 8; i++) {
+        ctx.strokeStyle = `rgba(0,0,0,${0.1 + rng() * 0.1})`;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        const sx = rng() * w, sy = rng() * h;
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx + (rng() - 0.5) * 40, sy + (rng() - 0.5) * 40);
+        ctx.stroke();
+      }
+    });
+  }
+
+  // 简易PRNG
+  function mulberry32(a) {
+    return function() {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // ========== 精细家具模型 ==========
+  function createDetailedTable(color) {
+    const g = new THREE.Group();
+    const tex = woodTexture(0x5a >> 1, 0x3a >> 1, 0x1a >> 1, 1);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.05 });
+    // 桌面
+    const top = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.06, 0.9), mat);
+    top.position.y = 0.77; g.add(top);
+    // 桌面边缘装饰
+    const edgeMat = new THREE.MeshStandardMaterial({ color: 0x3a2010, roughness: 0.8 });
+    const edgeF = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 0.03), edgeMat);
+    edgeF.position.set(0, 0.77, 0.45); g.add(edgeF);
+    const edgeB = edgeF.clone(); edgeB.position.z = -0.45; g.add(edgeB);
+    // 四条腿
+    const legGeo = new THREE.BoxGeometry(0.06, 0.74, 0.06);
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x3a2010, roughness: 0.8 });
+    [[-0.7, 0.37, 0.38], [0.7, 0.37, 0.38], [-0.7, 0.37, -0.38], [0.7, 0.37, -0.38]].forEach(p => {
+      const leg = new THREE.Mesh(legGeo, legMat);
+      leg.position.set(...p); g.add(leg);
+    });
+    // 横撑
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.04, 0.04), legMat);
+    strut.position.set(0, 0.2, 0); g.add(strut);
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedChair(color) {
+    const g = new THREE.Group();
+    const tex = woodTexture(0x4a >> 1, 0x2a >> 1, 0x0a >> 1, 2);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.05 });
+    // 座面
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.04, 0.45), mat);
+    seat.position.y = 0.45; g.add(seat);
+    // 靠背
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.5, 0.03), mat);
+    back.position.set(0, 0.72, -0.21); g.add(back);
+    // 靠背横条
+    const bar1 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.04, 0.025), mat);
+    bar1.position.set(0, 0.62, -0.21); g.add(bar1);
+    // 四条腿
+    const legGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.43, 6);
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x3a1a08, roughness: 0.8 });
+    [[-0.19, 0.215, 0.18], [0.19, 0.215, 0.18], [-0.19, 0.215, -0.18], [0.19, 0.215, -0.18]].forEach(p => {
+      const leg = new THREE.Mesh(legGeo, legMat);
+      leg.position.set(...p); g.add(leg);
+    });
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedBookshelf(color) {
+    const g = new THREE.Group();
+    const tex = woodTexture(0x3a >> 1, 0x20 >> 1, 0x10 >> 1, 3);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.05 });
+    // 侧板
+    const sideGeo = new THREE.BoxGeometry(0.04, 2.2, 0.5);
+    const sideL = new THREE.Mesh(sideGeo, mat); sideL.position.set(-0.58, 1.1, 0); g.add(sideL);
+    const sideR = new THREE.Mesh(sideGeo, mat); sideR.position.set(0.58, 1.1, 0); g.add(sideR);
+    // 背板
+    const backPanel = new THREE.Mesh(new THREE.BoxGeometry(1.12, 2.2, 0.03), mat);
+    backPanel.position.set(0, 1.1, -0.235); g.add(backPanel);
+    // 隔板（4层）
+    const shelfGeo = new THREE.BoxGeometry(1.08, 0.04, 0.46);
+    [0.02, 0.56, 1.1, 1.64, 2.18].forEach(y => {
+      const shelf = new THREE.Mesh(shelfGeo, mat);
+      shelf.position.set(0, y, 0); g.add(shelf);
+    });
+    // 书本（每层随机几本）
+    const bookColors = [0x8b0000, 0x006400, 0x00008b, 0x8b8b00, 0x4b0082, 0x8b4513, 0x2f4f4f, 0x800020];
+    const rng = mulberry32(42);
+    [0.08, 0.62, 1.16, 1.7].forEach(shelfY => {
+      let bx = -0.45;
+      const numBooks = 3 + Math.floor(rng() * 5);
+      for (let i = 0; i < numBooks && bx < 0.4; i++) {
+        const bw = 0.04 + rng() * 0.06;
+        const bh = 0.35 + rng() * 0.12;
+        const bookMat = new THREE.MeshStandardMaterial({ color: bookColors[Math.floor(rng() * bookColors.length)], roughness: 0.9 });
+        const book = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.3), bookMat);
+        book.position.set(bx + bw / 2, shelfY + bh / 2, 0.02);
+        g.add(book);
+        bx += bw + 0.005;
+      }
+    });
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedDesk(color) {
+    const g = new THREE.Group();
+    const tex = woodTexture(0x4a >> 1, 0x30 >> 1, 0x18 >> 1, 4);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.05 });
+    // 桌面
+    const top = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.05, 0.7), mat);
+    top.position.y = 0.75; g.add(top);
+    // 抽屉面板
+    const drawerMat = new THREE.MeshStandardMaterial({ color: 0x3a2810, roughness: 0.8 });
+    const drawer = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.25, 0.65), drawerMat);
+    drawer.position.set(0.35, 0.58, 0); g.add(drawer);
+    // 抽屉把手
+    const handleMat = new THREE.MeshStandardMaterial({ color: 0xbbaa66, metalness: 0.6, roughness: 0.3 });
+    const handleGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.08, 6);
+    const handle = new THREE.Mesh(handleGeo, handleMat);
+    handle.rotation.x = Math.PI / 2;
+    handle.position.set(0.35, 0.58, 0.34); g.add(handle);
+    // 四条腿
+    const legGeo = new THREE.BoxGeometry(0.05, 0.72, 0.05);
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x3a2010, roughness: 0.8 });
+    [[-0.65, 0.36, 0.3], [0.65, 0.36, 0.3], [-0.65, 0.36, -0.3], [0.65, 0.36, -0.3]].forEach(p => {
+      const leg = new THREE.Mesh(legGeo, legMat);
+      leg.position.set(...p); g.add(leg);
+    });
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedCrate(color) {
+    const g = new THREE.Group();
+    const tex = woodTexture(0x6a >> 1, 0x4a >> 1, 0x2a >> 1, 5);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0.05 });
+    // 箱体
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.7, 0.8), mat);
+    body.position.y = 0.35; g.add(body);
+    // 横木条
+    const stripMat = new THREE.MeshStandardMaterial({ color: 0x4a3018, roughness: 0.9 });
+    const stripH = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.06, 0.82), stripMat);
+    stripH.position.y = 0.55; g.add(stripH);
+    const stripH2 = stripH.clone(); stripH2.position.y = 0.2; g.add(stripH2);
+    // 角铁
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0x888877, metalness: 0.5, roughness: 0.4 });
+    [[-0.38, 0.35, 0.38], [0.38, 0.35, 0.38], [-0.38, 0.35, -0.38], [0.38, 0.35, -0.38]].forEach(p => {
+      const corner = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.7, 0.04), metalMat);
+      corner.position.set(...p); g.add(corner);
+    });
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedBarrel(color) {
+    const g = new THREE.Group();
+    const tex = woodTexture(0x5a >> 1, 0x3a >> 1, 0x1a >> 1, 6);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.05 });
+    // 桶身（用多段圆柱模拟弧度）
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.35, 0.9, 12), mat);
+    body.position.y = 0.45; g.add(body);
+    // 金属箍
+    const hoopMat = new THREE.MeshStandardMaterial({ color: 0x666655, metalness: 0.6, roughness: 0.35 });
+    [0.15, 0.45, 0.75].forEach(y => {
+      const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.015, 6, 16), hoopMat);
+      hoop.rotation.x = Math.PI / 2;
+      hoop.position.y = y; g.add(hoop);
+    });
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedChest(color) {
+    const g = new THREE.Group();
+    const tex = woodTexture(0x6a >> 1, 0x4a >> 1, 0x1a >> 1, 7);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.05 });
+    // 箱底
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 0.6), mat);
+    base.position.y = 0.2; g.add(base);
+    // 箱盖（弧形）
+    const lidGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.9, 8, 1, false, 0, Math.PI);
+    const lid = new THREE.Mesh(lidGeo, mat);
+    lid.rotation.z = Math.PI / 2;
+    lid.rotation.y = Math.PI / 2;
+    lid.position.set(0, 0.4, 0); g.add(lid);
+    // 金属锁扣
+    const lockMat = new THREE.MeshStandardMaterial({ color: 0xbbaa44, metalness: 0.7, roughness: 0.25 });
+    const lock = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.04), lockMat);
+    lock.position.set(0, 0.35, 0.31); g.add(lock);
+    // 金属条
+    const stripMat = new THREE.MeshStandardMaterial({ color: 0x887744, metalness: 0.5, roughness: 0.35 });
+    const strip1 = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.03, 0.62), stripMat);
+    strip1.position.y = 0.4; g.add(strip1);
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedWardrobe(color) {
+    const g = new THREE.Group();
+    const tex = woodTexture(0x3a >> 1, 0x28 >> 1, 0x18 >> 1, 8);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.05 });
+    // 主体
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.0, 0.6), mat);
+    body.position.y = 1.0; g.add(body);
+    // 门缝（中间线）
+    const seamMat = new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 0.9 });
+    const seam = new THREE.Mesh(new THREE.BoxGeometry(0.01, 1.9, 0.01), seamMat);
+    seam.position.set(0, 1.0, 0.305); g.add(seam);
+    // 门把手
+    const handleMat = new THREE.MeshStandardMaterial({ color: 0xbbaa66, metalness: 0.6, roughness: 0.3 });
+    const hGeo = new THREE.SphereGeometry(0.025, 6, 4);
+    const hL = new THREE.Mesh(hGeo, handleMat); hL.position.set(-0.08, 1.0, 0.31); g.add(hL);
+    const hR = new THREE.Mesh(hGeo, handleMat); hR.position.set(0.08, 1.0, 0.31); g.add(hR);
+    // 顶部装饰线
+    const crown = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.04, 0.64), mat);
+    crown.position.y = 2.02; g.add(crown);
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedBed(color) {
+    const g = new THREE.Group();
+    const tex = woodTexture(0x3a >> 1, 0x2a >> 1, 0x1a >> 1, 9);
+    const frameMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.05 });
+    // 床架
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.15, 2.0), frameMat);
+    frame.position.y = 0.25; g.add(frame);
+    // 床头板
+    const headboard = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.7, 0.06), frameMat);
+    headboard.position.set(0, 0.6, -0.97); g.add(headboard);
+    // 床垫
+    const mattressMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc8, roughness: 0.95 });
+    const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.12, 1.85), mattressMat);
+    mattress.position.y = 0.39; g.add(mattress);
+    // 枕头
+    const pillowMat = new THREE.MeshStandardMaterial({ color: 0xf0e8d8, roughness: 0.95 });
+    const pillow1 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.35), pillowMat);
+    pillow1.position.set(-0.35, 0.48, -0.7); g.add(pillow1);
+    const pillow2 = pillow1.clone(); pillow2.position.x = 0.35; g.add(pillow2);
+    // 被子
+    const blanketMat = new THREE.MeshStandardMaterial({ color: 0x4a3a5a, roughness: 0.95 });
+    const blanket = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.06, 1.2), blanketMat);
+    blanket.position.set(0, 0.47, 0.2); g.add(blanket);
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedStatue(color) {
+    const g = new THREE.Group();
+    const tex = stoneTexture(0x55, 0x55, 0x55, 10);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, metalness: 0.05 });
+    // 底座
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.3, 0.6), mat);
+    base.position.y = 0.15; g.add(base);
+    // 身体
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 1.2, 8), mat);
+    body.position.y = 0.9; g.add(body);
+    // 头
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), mat);
+    head.position.y = 1.65; g.add(head);
+    // 手臂暗示
+    const armGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.5, 6);
+    const armL = new THREE.Mesh(armGeo, mat); armL.position.set(-0.28, 1.0, 0); armL.rotation.z = 0.3; g.add(armL);
+    const armR = new THREE.Mesh(armGeo, mat); armR.position.set(0.28, 1.0, 0); armR.rotation.z = -0.3; g.add(armR);
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedAltar(color) {
+    const g = new THREE.Group();
+    const tex = stoneTexture(0x2a, 0x1a, 0x2a, 11);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0.1 });
+    // 底座
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.3, 0.9), mat);
+    base.position.y = 0.15; g.add(base);
+    // 台面
+    const top = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, 1.0), mat);
+    top.position.y = 0.85; g.add(top);
+    // 中间柱体
+    const mid = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.45, 0.75), mat);
+    mid.position.y = 0.525; g.add(mid);
+    // 刻纹装饰
+    const runeMat = new THREE.MeshStandardMaterial({ color: 0x442244, emissive: 0x220022, emissiveIntensity: 0.3, roughness: 0.7 });
+    const rune = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.02), runeMat);
+    rune.position.set(0, 0.55, 0.385); g.add(rune);
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
+  }
+
+  function createDetailedFireplace(color) {
+    const g = new THREE.Group();
+    const tex = stoneTexture(0x2a, 0x2a, 0x2a, 12);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, metalness: 0.05 });
+    // 外框
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2, 0.5), mat);
+    frame.position.y = 0.6; g.add(frame);
+    // 内部凹陷（深色）
+    const innerMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 1.0 });
+    const inner = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 0.3), innerMat);
+    inner.position.set(0, 0.45, 0.12); g.add(inner);
+    // 壁炉台面
+    const mantel = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 0.55), mat);
+    mantel.position.y = 1.24; g.add(mantel);
+    g.children.forEach(c => { c.castShadow = true; c.receiveShadow = true; });
+    return g;
   }
 
   function autoDecorate(w, h, template) {
@@ -2147,10 +2525,9 @@ const SceneManager = (() => {
       // 获取物件世界位置，标签放在物体顶部
       const worldPos = new THREE.Vector3();
       group.getWorldPosition(worldPos);
-      // 计算物体包围盒高度，标签放在顶部上方0.2
+      // 计算物体包围盒高度，标签紧贴物体顶部上方0.05
       const box = new THREE.Box3().setFromObject(group);
-      const objHeight = box.max.y - box.min.y;
-      worldPos.y = box.max.y + 0.2;
+      worldPos.y = box.max.y + 0.05;
 
       // 投影到屏幕坐标
       const screenPos = worldPos.clone().project(camera);
@@ -2165,6 +2542,21 @@ const SceneManager = (() => {
       const dist = worldPos.distanceTo(playerWorldPos);
       if (dist > 8) return;
 
+      // 深度遮挡检测：检测玩家角色是否挡在标签前面
+      let occluded = false;
+      if (raycaster && playerMesh) {
+        const labelDir = worldPos.clone().sub(camera.position).normalize();
+        const distToLabel = camera.position.distanceTo(worldPos);
+        raycaster.set(camera.position, labelDir);
+        // 只检测玩家角色是否遮挡标签
+        const playerMeshes = [];
+        playerMesh.traverse(child => { if (child.isMesh) playerMeshes.push(child); });
+        const hits = raycaster.intersectObjects(playerMeshes, false);
+        if (hits.length > 0 && hits[0].distance < distToLabel - 0.3) {
+          occluded = true;
+        }
+      }
+
       // 判断是否在交互距离内（靠近强化标签）
       const isNearby = dist <= 2.5;
 
@@ -2176,13 +2568,17 @@ const SceneManager = (() => {
 
       const label = document.createElement('div');
       label.className = 'scene-object-label';
-      const bgAlpha = isNearby ? '0.95' : '0.85';
-      const borderColor = isNearby ? 'rgba(201,160,78,0.7)' : 'rgba(201,160,78,0.3)';
+      // 被遮挡时大幅降低透明度，避免盖住前景角色
+      const occludeAlpha = occluded ? 0.15 : (isNearby ? 0.95 : 0.85);
+      const occludeColorAlpha = occluded ? 0.1 : (isNearby ? 0.7 : 0.3);
+      const bgAlpha = occludeAlpha;
+      const borderColor = `rgba(201,160,78,${occludeColorAlpha})`;
       const fontSize = isNearby ? '12px' : '11px';
+      const pointerEvents = occluded ? 'none' : 'auto';
       label.style.cssText = `position:absolute;left:${x}px;top:${y}px;transform:translate(-50%,-100%);
         background:rgba(10,10,18,${bgAlpha});color:#c9a04e;font-size:${fontSize};padding:2px 8px;
         border-radius:3px;border:1px solid ${borderColor};white-space:nowrap;
-        pointer-events:auto;cursor:pointer;transition:opacity 0.2s;`;
+        pointer-events:${pointerEvents};cursor:pointer;transition:opacity 0.2s;`;
       label.textContent = labelText;
       label.dataset.type = obj.type;
       label.dataset.gridX = obj.gridX;
