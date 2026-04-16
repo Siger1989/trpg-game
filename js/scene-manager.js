@@ -793,24 +793,49 @@ const SceneManager = (() => {
 
     const points = path.map(p => {
       const w = gridToWorld(p.x, p.z);
-      return new THREE.Vector3(w.x, 0.05, w.z); // 贴地
+      return new THREE.Vector3(w.x, 0.08, w.z); // 贴地稍高
     });
-    const geo = new THREE.BufferGeometry().setFromPoints(points);
-    // 增强绿色轨迹线亮度和宽度
-    const mat = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 3, transparent: true, opacity: 1.0 });
-    pathLine = new THREE.Line(geo, mat);
+
+    // 使用管道几何体做粗发光轨迹线（比LineBasicMaterial更明显）
+    const curve = new THREE.CatmullRomCurve3(points);
+    const tubeGeo = new THREE.TubeGeometry(curve, points.length * 8, 0.06, 8, false);
+    const tubeMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, transparent: true, opacity: 0.85 });
+    pathLine = new THREE.Mesh(tubeGeo, tubeMat);
     pathLine.name = 'pathLine';
     scene.add(pathLine);
+
+    // 每个路径节点加小发光球
+    path.forEach((p, i) => {
+      if (i === 0 || i === path.length - 1) return; // 起终点用环
+      const w = gridToWorld(p.x, p.z);
+      const dotGeo = new THREE.SphereGeometry(0.08, 8, 6);
+      const dotMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, transparent: true, opacity: 0.9 });
+      const dot = new THREE.Mesh(dotGeo, dotMat);
+      dot.position.set(w.x, 0.08, w.z);
+      dot.name = 'pathDot';
+      scene.add(dot);
+    });
 
     // 目标格子高亮（绿色发光环）
     const endP = path[path.length - 1];
     const endW = gridToWorld(endP.x, endP.z);
-    const hlGeo = new THREE.RingGeometry(0.3, 0.6, 16);
-    const hlMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide, transparent: true, opacity: 1.0 });
+    const hlGeo = new THREE.RingGeometry(0.25, 0.55, 16);
+    const hlMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, side: THREE.DoubleSide, transparent: true, opacity: 1.0 });
     pathHighlight = new THREE.Mesh(hlGeo, hlMat);
     pathHighlight.rotation.x = -Math.PI / 2;
-    pathHighlight.position.set(endW.x, 0.06, endW.z);
+    pathHighlight.position.set(endW.x, 0.09, endW.z);
     scene.add(pathHighlight);
+
+    // 起点标记（小蓝环）
+    const startP = path[0];
+    const startW = gridToWorld(startP.x, startP.z);
+    const sGeo = new THREE.RingGeometry(0.15, 0.35, 16);
+    const sMat = new THREE.MeshBasicMaterial({ color: 0x4488ff, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+    const startRing = new THREE.Mesh(sGeo, sMat);
+    startRing.rotation.x = -Math.PI / 2;
+    startRing.position.set(startW.x, 0.09, startW.z);
+    startRing.name = 'pathStart';
+    scene.add(startRing);
   }
 
   // 显示红色轨迹线（AP不足）
@@ -820,19 +845,19 @@ const SceneManager = (() => {
 
     const points = path.map(p => {
       const w = gridToWorld(p.x, p.z);
-      return new THREE.Vector3(w.x, 0.05, w.z); // 贴地
+      return new THREE.Vector3(w.x, 0.08, w.z);
     });
-    const geo = new THREE.BufferGeometry().setFromPoints(points);
-    // 红色轨迹线
-    const mat = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 3, transparent: true, opacity: 1.0 });
-    pathLine = new THREE.Line(geo, mat);
+    const curve = new THREE.CatmullRomCurve3(points);
+    const tubeGeo = new THREE.TubeGeometry(curve, points.length * 8, 0.06, 8, false);
+    const tubeMat = new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.85 });
+    pathLine = new THREE.Mesh(tubeGeo, tubeMat);
     pathLine.name = 'pathLine';
     scene.add(pathLine);
 
     // 目标格子高亮（红色发光环）
     const endP = path[path.length - 1];
     const endW = gridToWorld(endP.x, endP.z);
-    const hlGeo = new THREE.RingGeometry(0.3, 0.6, 16);
+    const hlGeo = new THREE.RingGeometry(0.25, 0.55, 16);
     const hlMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 1.0 });
     pathHighlight = new THREE.Mesh(hlGeo, hlMat);
     pathHighlight.rotation.x = -Math.PI / 2;
@@ -844,6 +869,12 @@ const SceneManager = (() => {
   function clearPathLine() {
     if (pathLine && scene) { scene.remove(pathLine); pathLine.geometry.dispose(); pathLine.material.dispose(); pathLine = null; }
     if (pathHighlight && scene) { scene.remove(pathHighlight); pathHighlight.geometry.dispose(); pathHighlight.material.dispose(); pathHighlight = null; }
+    // 清除路径节点球和起点环
+    if (scene) {
+      const toRemove = [];
+      scene.traverse(obj => { if (obj.name === 'pathDot' || obj.name === 'pathStart') toRemove.push(obj); });
+      toRemove.forEach(obj => { scene.remove(obj); obj.geometry?.dispose(); obj.material?.dispose(); });
+    }
     pathTarget = null;
   }
 
@@ -951,7 +982,10 @@ const SceneManager = (() => {
   }
 
   function handleSceneClick(e) {
-    if (!camera || !currentRoom || !floorMesh) return;
+    if (!camera || !currentRoom || !floorMesh) {
+      console.warn('[SceneManager] 点击检测跳过:', { hasCamera: !!camera, hasRoom: !!currentRoom, hasFloor: !!floorMesh });
+      return;
+    }
 
     const rect = renderer.domElement.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -961,15 +995,20 @@ const SceneManager = (() => {
 
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObject(floorMesh);
-    if (intersects.length === 0) return;
+    if (intersects.length === 0) {
+      console.log('[SceneManager] raycast未命中地板');
+      return;
+    }
 
     const point = intersects[0].point;
     const grid = worldToGrid(point.x, point.z);
+    console.log('[SceneManager] 点击格子:', grid, '世界坐标:', point);
 
     if (grid.x < 0 || grid.x >= currentRoom.width || grid.z < 0 || grid.z >= currentRoom.height) return;
 
     // 调用clickGrid逻辑
     const result = clickGrid(grid.x, grid.z);
+    console.log('[SceneManager] clickGrid结果:', result);
     if (result === 'preview') {
       // 第一次点击：显示路径
     } else if (result === 'move') {
