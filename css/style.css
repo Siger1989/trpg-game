@@ -612,65 +612,7 @@ html, body {
   background: var(--accent-glow);
 }
 
-/* 移动端方向键 */
-.mobile-controls {
-  position: absolute;
-  bottom: 160px;
-  left: 16px;
-  display: none;
-  z-index: 20;
-}
-
-.dpad {
-  display: grid;
-  grid-template-columns: repeat(3, 40px);
-  grid-template-rows: repeat(3, 40px);
-  gap: 2px;
-}
-
-.dpad-btn {
-  width: 40px;
-  height: 40px;
-  border: 1px solid rgba(201,160,78,0.4);
-  border-radius: 6px;
-  background: rgba(10,10,18,0.8);
-  color: var(--accent);
-  font-size: 18px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-}
-.dpad-btn:active {
-  background: rgba(201,160,78,0.3);
-  transform: scale(0.92);
-}
-
-.dpad-up { grid-column: 2; grid-row: 1; }
-.dpad-left { grid-column: 1; grid-row: 2; }
-.dpad-center { grid-column: 2; grid-row: 2; font-size: 14px; }
-.dpad-right { grid-column: 3; grid-row: 2; }
-.dpad-down { grid-column: 2; grid-row: 3; }
-
-/* 竖屏时方向键位置调整 */
-@media (max-width: 768px) and (orientation: portrait) {
-  .mobile-controls {
-    position: absolute;
-    bottom: 8px;
-    left: 8px;
-    z-index: 20;
-  }
-  .dpad {
-    grid-template-columns: repeat(3, 44px);
-    grid-template-rows: repeat(3, 44px);
-  }
-  .dpad-btn {
-    width: 44px;
-    height: 44px;
-    font-size: 20px;
-  }
+/* 移动端方向键已移除（改为点击格子移动） */
 }
 
 /* ========== 战斗覆盖 ========== */
@@ -1163,22 +1105,7 @@ html, body {
     flex-shrink: 0;
   }
 
-  /* 移动端方向键：浮动在3D场景左下角 */
-  .mobile-controls {
-    position: absolute;
-    bottom: 8px;
-    left: 8px;
-    z-index: 20;
-  }
-  .dpad {
-    grid-template-columns: repeat(3, 44px);
-    grid-template-rows: repeat(3, 44px);
-  }
-  .dpad-btn {
-    width: 44px;
-    height: 44px;
-    font-size: 20px;
-  }
+  /* 方向键已移除 */
 
   /* 移动提示条适配 */
   .move-hint-bar {
@@ -1241,7 +1168,6 @@ html, body {
   .bar { width: 90px; height: 12px; }
   .hud-narrative { max-height: 35vh; min-height: 80px; }
   .narrative-input input { font-size: 16px; }
-  .mobile-controls { display: block; bottom: 100px; left: 12px; width: 80px; height: 80px; }
 }
 
 /* ========== 动画 ========== */

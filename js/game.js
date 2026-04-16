@@ -69,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let charCreateBound = false;
   let moveMode = false;
   let moveStepCount = 0;
+  let selectedGrid = null; // 当前选中的格子（用于点击移动）
 
   // 存档检查
   if (GameState.hasSave()) {
@@ -274,16 +275,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof SceneManager !== 'undefined' && SceneManager.loadPlayerModel) {
       SceneManager.loadPlayerModel('assets/monster.glb');
     }
-    // 竖屏设备自动显示方向键
-    const mc = document.getElementById('mobile-controls');
-    if (mc && window.matchMedia('(max-width: 768px)').matches) {
-      mc.style.display = 'block';
-    }
     // 设置3D物件交互回调
     if (typeof SceneManager !== 'undefined' && SceneManager.setObjectInteractionHandler) {
       SceneManager.setObjectInteractionHandler((type, name, gx, gz) => {
-        if (moveMode) return;
-
         // 距离检查：必须相邻才能交互
         if (!SceneManager.canInteract(gx, gz)) {
           const dist = SceneManager.getInteractDistance(gx, gz).toFixed(1);
@@ -374,7 +368,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function handleChoice(actionId) {
-    if (moveMode) { moveMode = false; if (typeof CameraControls !== 'undefined' && CameraControls.setEnabled) CameraControls.setEnabled(true); }
     if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！请结束回合。','system'); return; }
     const result = DMEngine.processChoice(actionId); if (!result) return;
     UI.addNarration(result.narration, 'dm');
@@ -386,30 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateFog(); GameState.saveGame(); UI.updateHUD();
   }
 
-  function toggleMoveMode() { moveMode ? exitMoveMode() : enterMoveMode(); }
-  function enterMoveMode() {
-    moveMode = true; moveStepCount = 0;
-    // 禁用相机控制器避免移动冲突
-    if (typeof CameraControls !== 'undefined' && CameraControls.setEnabled) CameraControls.setEnabled(false);
-    const moveBtn = document.querySelector('.move-mode-btn'); if(moveBtn){moveBtn.textContent='🚶 移动中...';moveBtn.style.borderColor='var(--accent)';moveBtn.style.background='rgba(201,160,78,0.2)';}
-    const inputArea = document.querySelector('.narrative-input'); if(inputArea) inputArea.style.display='none';
-    let moveHint = document.getElementById('move-hint');
-    if(!moveHint){moveHint=document.createElement('div');moveHint.id='move-hint';moveHint.className='move-hint-bar';document.getElementById('narrative-panel')?.insertBefore(moveHint,document.getElementById('narrative-panel').firstChild);}
-    moveHint.style.display='flex';
-    moveHint.innerHTML='<span>🚶 移动模式 — WASD移动 | 步数: <b id="move-step-count">0</b></span><button class="btn-stop-move" id="btn-stop-move">✓ 停止移动</button>';
-    document.getElementById('btn-stop-move').addEventListener('click',()=>exitMoveMode());
-    UI.addNarration('进入移动模式。WASD移动，Esc或停止按钮退出。','system');
-  }
-  function exitMoveMode() {
-    moveMode = false;
-    // 恢复相机控制器
-    if (typeof CameraControls !== 'undefined' && CameraControls.setEnabled) CameraControls.setEnabled(true);
-    const moveBtn = document.querySelector('.move-mode-btn'); if(moveBtn){moveBtn.textContent='🚶 移动';moveBtn.style.borderColor='';moveBtn.style.background='';}
-    const inputArea = document.querySelector('.narrative-input'); if(inputArea) inputArea.style.display='flex';
-    const moveHint = document.getElementById('move-hint'); if(moveHint) moveHint.style.display='none';
-    if(moveStepCount>0) UI.addNarration(`你移动了${moveStepCount}步，停下来观察周围。`,'system');
-    moveStepCount=0; updateFog(); GameState.saveGame();
-  }
+  // 移动模式已移除，改为点击格子移动
   function updateFog() {
     if(typeof FogOfWar==='undefined'||!FogOfWar.isInitialized?.()) return;
     try{
@@ -473,7 +443,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('player-input').addEventListener('keydown', (e) => { if(e.key==='Enter') sendPlayerInput(); });
 
   async function sendPlayerInput() {
-    if(moveMode){UI.addNarration('移动中，请先停止再输入指令。','system');return;}
     const input = document.getElementById('player-input'); const text = input.value.trim(); if(!text) return;
     UI.addNarration(`> ${text}`, 'player'); input.value = '';
 
@@ -561,48 +530,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 移动端方向键：直接移动
-  document.querySelectorAll('.dpad-btn[data-dx]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const dx = parseInt(btn.dataset.dx);
-      const dz = parseInt(btn.dataset.dz);
-      const moved = SceneManager.movePlayer(dx, dz);
-      if (moved) {
-        if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); return; }
-        updateFog(); UI.updateHUD();
-      }
-    });
-    // 长按连续移动
-    let longPressTimer = null;
-    btn.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      const dx = parseInt(btn.dataset.dx);
-      const dz = parseInt(btn.dataset.dz);
-      const moved = SceneManager.movePlayer(dx, dz);
-      if (moved) {
-        if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); return; }
-        updateFog(); UI.updateHUD();
-      }
-      longPressTimer = setInterval(() => {
-        const m = SceneManager.movePlayer(dx, dz);
-        if (m) {
-          if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); clearInterval(longPressTimer); return; }
-          const countEl = document.getElementById('move-step-count'); if (countEl) countEl.textContent = moveStepCount;
-          updateFog(); UI.updateHUD();
-        }
-      }, 250);
-    }, { passive: false });
-    btn.addEventListener('touchend', () => { if (longPressTimer) { clearInterval(longPressTimer); longPressTimer = null; } });
-    btn.addEventListener('touchcancel', () => { if (longPressTimer) { clearInterval(longPressTimer); longPressTimer = null; } });
-  });
-
-  // 方向键中心按钮：清除路径
-  const dpadCenter = document.getElementById('dpad-center');
-  if (dpadCenter) {
-    dpadCenter.addEventListener('click', () => {
-      if (typeof SceneManager !== 'undefined' && SceneManager.clearPathLine) SceneManager.clearPathLine();
-    });
-  }
+  // 点击格子移动（通过SceneManager的clickGrid）
+  // 已在SceneManager.init中通过raycast实现
 
   // AI设置面板（动态创建）
   const aiBtn = document.createElement('button'); aiBtn.className='action-btn'; aiBtn.textContent='🤖 AI设置'; aiBtn.style.position='fixed'; aiBtn.style.top='10px'; aiBtn.style.right='10px'; aiBtn.style.zIndex='999';

@@ -994,18 +994,25 @@ const SceneManager = (() => {
       console.log('[SceneManager] GLB模型加载成功:', gltf);
       console.log('[SceneManager] 动画列表:', gltf.animations.map(a => a.name));
       const model = gltf.scene;
-      // 缩放适配格子大小
-      model.scale.set(0.5, 0.5, 0.5);
+      // 根据模型包围盒自动缩放，使其高度约为1.5格
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const targetHeight = 1.5; // 目标高度（格子单位）
+      const autoScale = size.y > 0 ? targetHeight / size.y : 0.5;
+      model.scale.set(autoScale, autoScale, autoScale);
+      console.log('[SceneManager] 模型原始尺寸:', size, '自动缩放:', autoScale);
       // 如果有动画
       if (gltf.animations && gltf.animations.length > 0) {
         playerMixer = new THREE.AnimationMixer(model);
         gltf.animations.forEach(clip => {
           const action = playerMixer.clipAction(clip);
-          playerActions[clip.name.toLowerCase()] = action;
+          playerActions[clip.name] = action; // 保留原始名称
+          playerActions[clip.name.toLowerCase()] = action; // 小写别名
         });
         console.log('[SceneManager] 可用动作:', Object.keys(playerActions));
         // 默认播放idle或第一个动画
-        playAction('idle') || playAction(Object.keys(playerActions)[0]);
+        const idleAction = playerActions['idle'] || playerActions['Idle'] || playerActions[Object.keys(playerActions)[0]];
+        if (idleAction) { idleAction.reset().fadeIn(0.3).play(); currentAction = Object.keys(playerActions).find(k => playerActions[k] === idleAction) || 'idle'; }
       }
       // 替换旧模型
       if (playerMesh && scene) scene.remove(playerMesh);
