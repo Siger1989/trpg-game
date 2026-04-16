@@ -1733,10 +1733,13 @@ const SceneManager = (() => {
       const group = obj.group;
       if (!group) return;
 
-      // 获取物件世界位置
+      // 获取物件世界位置，标签放在物体顶部
       const worldPos = new THREE.Vector3();
       group.getWorldPosition(worldPos);
-      worldPos.y += 1.5;
+      // 计算物体包围盒高度，标签放在顶部上方0.2
+      const box = new THREE.Box3().setFromObject(group);
+      const objHeight = box.max.y - box.min.y;
+      worldPos.y = box.max.y + 0.2;
 
       // 投影到屏幕坐标
       const screenPos = worldPos.clone().project(camera);
