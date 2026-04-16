@@ -338,8 +338,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 门类物件
     if (type === 'door') {
-      const isOpen = SceneManager.getObjectAt(gx, gz)?.isOn; // door的isOn=isOpen
+      const doorObj = SceneManager.getObjectAt(gx, gz);
+      const isOpen = doorObj?.isOn; // door的isOn=isOpen
+      const isPortal = doorObj?.portal && doorObj?.connectedRoomId;
+
       if (isOpen) {
+        // B1: 已开启的portal门→进入房间；普通门→关闭
+        if (isPortal) {
+          // 调用DMEngine处理门进入逻辑
+          const doorResult = DMEngine.handleDoorInteraction(gx, gz, 'enter');
+          if (doorResult.success) {
+            return ActionResolver.makeOutcome({
+              success: true, consumesAp: 1,
+              logs: [doorResult.narration],
+              stateChanges: [], // switchToRoom已内部处理状态
+              narrationHint: doorResult.narration,
+              requiresRender: true,
+              resultType: ActionResolver.RESULT_TYPES.SUCCESS,
+              // B1: 房间切换元数据
+              nextScene: doorResult.nextScene,
+              connectedRoomId: doorResult.connectedRoomId,
+              entryFromRoom: doorResult.entryFromRoom
+            });
+          } else {
+            return ActionResolver.makeOutcome({
+              success: false, consumesAp: 0,
+              logs: [doorResult.narration],
+              narrationHint: doorResult.narration,
+              resultType: ActionResolver.RESULT_TYPES.FAILURE
+            });
+          }
+        }
+        // 非portal门→关闭
         return ActionResolver.makeOutcome({
           success: true, consumesAp: 1,
           logs: [`你关上了${name}。`],
@@ -439,18 +469,36 @@ document.addEventListener('DOMContentLoaded', () => {
           const result = DMEngine.applyOutcome(outcome);
           // 显示叙事
           UI.addNarration(outcome.narrationHint || outcome.logs.join('\n'), 'dm');
-          // 需要渲染更新
+          // A1: 灯光/门状态变更后同步迷雾
           if (result.renderNeeded || outcome.requiresRender) {
             updateFog();
+          }
+          // B1: 房间切换处理
+          if (outcome.nextScene) {
+            setTimeout(() => {
+              loadCurrentScene(outcome.entryFromRoom);
+              UI.addNarration(outcome.nextScene.narration || '你来到了一个新的地方...', 'dm');
+              showChoices(DMEngine.getChoices());
+              DMEngine.resetAP();
+              UI.updateHUD();
+            }, 800);
+            return; // 房间切换后不再执行后续逻辑
           }
           UI.updateHUD(); GameState.saveGame();
         }
       });
     }
   }
-  function loadCurrentScene() {
+  function loadCurrentScene(entryFromRoom) {
     const scene = DMEngine.getCurrentScene(); if (!scene) return;
     SceneManager.buildRoom(scene.room, scene.width, scene.height, scene.objects, scene.atmosphere);
+    // B1: 如果从另一个房间进入，将玩家定位到入口门附近
+    if (entryFromRoom && typeof RoomTemplates !== 'undefined' && RoomTemplates.getEntryPosition) {
+      const entryPos = RoomTemplates.getEntryPosition(scene, entryFromRoom);
+      if (entryPos && SceneManager.movePlayer) {
+        SceneManager.movePlayer(entryPos.x, entryPos.z);
+      }
+    }
     if (typeof FogOfWar !== 'undefined' && FogOfWar.init) {
       try { FogOfWar.init(scene.width||6, scene.height||6); const pp=SceneManager.getPlayerPos(); const p=GameState.getPlayer(); FogOfWar.updateVision(pp.x,pp.z,p?.skills?.['侦查']||25,scene.atmosphere?.lightIntensity||1.0); } catch(e) {}
     }
@@ -575,11 +623,22 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // 成功的灯光操作→应用Outcome+更新迷雾
+    // 成功的操作→应用Outcome+更新迷雾
     if (outcome && outcome.success) {
-      DMEngine.applyOutcome(outcome);
-      if (outcome.requiresRender) {
+      const applyResult = DMEngine.applyOutcome(outcome);
+      // A1: 灯光/门状态变更后同步迷雾
+      if (outcome.requiresRender || applyResult.renderNeeded) {
         updateFog();
+      }
+      // B1: 房间切换处理
+      if (outcome.nextScene) {
+        setTimeout(() => {
+          loadCurrentScene(outcome.entryFromRoom);
+          UI.addNarration(outcome.nextScene.narration || '你来到了一个新的地方...', 'dm');
+          showChoices(DMEngine.getChoices());
+          DMEngine.resetAP();
+          UI.updateHUD();
+        }, 800);
       }
     }
 

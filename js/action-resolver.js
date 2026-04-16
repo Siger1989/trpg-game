@@ -36,7 +36,7 @@ const ActionResolver = (() => {
   };
 
   // ========== ActionOutcome工厂 ==========
-  function makeOutcome({ success, consumesAp, logs, stateChanges, narrationHint, requiresRender, resultType, targetId, uiHint }) {
+  function makeOutcome({ success, consumesAp, logs, stateChanges, narrationHint, requiresRender, resultType, targetId, uiHint, nextScene, connectedRoomId, entryFromRoom }) {
     return {
       success: !!success,
       consumesAp: consumesAp || 0,
@@ -46,7 +46,11 @@ const ActionResolver = (() => {
       requiresRender: requiresRender || false,
       resultType: resultType || (success ? RESULT_TYPES.SUCCESS : RESULT_TYPES.NO_TARGET),
       targetId: targetId || null,
-      uiHint: uiHint || null
+      uiHint: uiHint || null,
+      // B1: 房间切换元数据
+      nextScene: nextScene || null,
+      connectedRoomId: connectedRoomId || null,
+      entryFromRoom: entryFromRoom || null
     };
   }
 
@@ -425,11 +429,15 @@ const ActionResolver = (() => {
       requiresRender: actionResult.success && (
         actionResult.verb === 'turn_on' || actionResult.verb === 'ignite' ||
         actionResult.verb === 'turn_off' || actionResult.verb === 'extinguish' ||
-        actionResult.verb === 'open'
+        actionResult.verb === 'open' || actionResult.verb === 'enter'
       ),
       resultType,
       targetId: actionResult.targetId || null,
-      uiHint: actionResult.uiHint || null
+      uiHint: actionResult.uiHint || null,
+      // B1: 房间切换元数据透传
+      nextScene: actionResult.nextScene || null,
+      connectedRoomId: actionResult.connectedRoomId || null,
+      entryFromRoom: actionResult.entryFromRoom || null
     });
   }
 
@@ -474,30 +482,17 @@ const ActionResolver = (() => {
 
   // ========== 执行动作（Phase 2：通过Outcome驱动，不再直接改状态） ==========
   /**
-   * executeAction - 执行Outcome中的stateChanges
-   * 这个函数由dm-engine.applyOutcome调用，不再由外部直接调用
+   * executeAction - 执行动作后的视觉反馈（高亮）
+   * 视觉同步（灯光/门）已由 DMEngine.applyOutcome() 统一触发，此处不再重复调用
    */
   function executeAction(resolved, sceneManager) {
     if (!resolved || !resolved.verdict) return resolved;
-    const { action, targetType, targetGridX, targetGridZ } = resolved;
+    const { targetGridX, targetGridZ } = resolved;
 
-    switch (action) {
-      case 'toggle_light':
-      case 'turn_on':
-      case 'ignite':
-        if (sceneManager.toggleObjectLight) sceneManager.toggleObjectLight(targetGridX, targetGridZ);
-        break;
-      case 'turn_off':
-      case 'extinguish':
-        if (sceneManager.toggleObjectLight) sceneManager.toggleObjectLight(targetGridX, targetGridZ);
-        break;
-      case 'open':
-      case 'close':
-        if (targetType === 'door' && sceneManager.toggleDoor) sceneManager.toggleDoor(targetGridX, targetGridZ);
-        break;
+    // 只做高亮反馈，灯光/门的3D视觉同步由applyOutcome()负责
+    if (sceneManager && sceneManager.highlightObject) {
+      sceneManager.highlightObject(targetGridX, targetGridZ, 800);
     }
-
-    if (sceneManager.highlightObject) sceneManager.highlightObject(targetGridX, targetGridZ, 800);
     return resolved;
   }
 

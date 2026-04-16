@@ -305,30 +305,141 @@ const RoomTemplates = (() => {
    * @param {Object} scenario - 剧本对象
    * @returns {Object} 添加了门连接的剧本
    */
+  /**
+   * C1-3升级: 为剧本场景添加门连接属性
+   * 支持三种连接来源：
+   * 1. DEFAULT_CONNECTIONS 硬编码连接（old_house等预设剧本）
+   * 2. scenario.transitions 动态连接（AI生成的剧本）
+   * 3. 场景编译器编译后的connections字段
+   */
   function applyConnections(scenario) {
     if (!scenario || !scenario.scenes) return scenario;
 
-    const connections = DEFAULT_CONNECTIONS[scenario.scenarioId || 'old_house'] || [];
-
-    for (const conn of connections) {
-      // 找到源房间场景
+    // 来源1: 硬编码的DEFAULT_CONNECTIONS
+    const hardcodedConns = DEFAULT_CONNECTIONS[scenario.scenarioId || 'old_house'] || [];
+    for (const conn of hardcodedConns) {
       const fromScene = scenario.scenes.find(s => s.id === conn.fromRoom);
       if (fromScene && fromScene.objects) {
-        // 找到对应墙上的门
         for (const obj of fromScene.objects) {
-          if (obj.type === 'door') {
-            // 如果门在该墙上且位置匹配，添加连接
-            if (!obj.connectedRoomId) {
-              obj.connectedRoomId = conn.toRoom;
-              obj.portal = true;
-              obj.wall = obj.wall || conn.fromWall;
-            }
+          if (obj.type === 'door' && !obj.connectedRoomId) {
+            obj.connectedRoomId = conn.toRoom;
+            obj.portal = true;
+            obj.wall = obj.wall || conn.fromWall;
+          }
+        }
+      }
+    }
+
+    // 来源2: scenario.transitions（AI生成剧本的动态连接）
+    const transitions = scenario.transitions || {};
+    const sceneIndex = {};
+    scenario.scenes.forEach((s, i) => { sceneIndex[s.id] = i; });
+
+    for (const [action, trans] of Object.entries(transitions)) {
+      if (!trans.nextScene) continue;
+      // 解析action格式: "next_s0" → 源场景index=0, "back_s1" → 源场景index=1
+      const match = action.match(/^(?:next|back)_s(\d+)$/);
+      if (!match) continue;
+      const sourceIdx = parseInt(match[1]);
+      const sourceScene = scenario.scenes[sourceIdx];
+      if (!sourceScene || !sourceScene.objects) continue;
+
+      // 确定门的方向：next→北墙，back→南墙
+      const isForward = action.startsWith('next');
+      const doorWall = isForward ? 'north' : 'south';
+
+      // 找到该墙上未连接的门
+      let doorFound = false;
+      for (const obj of sourceScene.objects) {
+        if (obj.type === 'door' && !obj.connectedRoomId) {
+          obj.connectedRoomId = trans.nextScene;
+          obj.portal = true;
+          obj.wall = obj.wall || doorWall;
+          doorFound = true;
+          break; // 每个transition只连接一个门
+        }
+      }
+
+      // 如果没有门，自动创建一个
+      if (!doorFound) {
+        const doorPos = calcWallPosition(doorWall, 'center', sourceScene.width || 5, sourceScene.height || 5);
+        sourceScene.objects.push({
+          type: 'door',
+          x: doorPos.x,
+          z: doorPos.z,
+          wall: doorWall,
+          connectedRoomId: trans.nextScene,
+          portal: true,
+          isOpen: false,
+          isOn: false,
+          role: 'interactive',
+          actions: ['open', 'close', 'enter'],
+          requiredRange: 1,
+          needsLOS: true
+        });
+      }
+    }
+
+    // 来源3: 编译器编译后的connections字段（已在tryCompileScene中处理为门对象）
+    // 这里做二次校验：确保编译器生成的门的connectedRoomId指向存在的场景
+    for (const scene of scenario.scenes) {
+      if (!scene.objects) continue;
+      for (const obj of scene.objects) {
+        if (obj.type === 'door' && obj.connectedRoomId) {
+          // 验证目标场景存在
+          const targetExists = scenario.scenes.some(s => s.id === obj.connectedRoomId);
+          if (!targetExists) {
+            console.warn(`[RoomTemplates] 门连接到不存在的场景: ${obj.connectedRoomId}，移除连接`);
+            delete obj.connectedRoomId;
+            obj.portal = false;
+          }
+        }
+      }
+    }
+
+    // 双向连接补全：如果A→B有门，确保B→A也有门
+    for (const scene of scenario.scenes) {
+      if (!scene.objects) continue;
+      for (const obj of scene.objects) {
+        if (obj.type === 'door' && obj.connectedRoomId && obj.portal) {
+          const targetScene = scenario.scenes.find(s => s.id === obj.connectedRoomId);
+          if (!targetScene || !targetScene.objects) continue;
+          // 检查目标场景是否有指向当前场景的门
+          const hasReturn = targetScene.objects.some(o =>
+            o.type === 'door' && o.connectedRoomId === scene.id
+          );
+          if (!hasReturn) {
+            // 自动创建返回门
+            const returnWall = getOppositeWall(obj.wall || 'north');
+            const returnPos = calcWallPosition(returnWall, 'center', targetScene.width || 5, targetScene.height || 5);
+            targetScene.objects.push({
+              type: 'door',
+              x: returnPos.x,
+              z: returnPos.z,
+              wall: returnWall,
+              connectedRoomId: scene.id,
+              portal: true,
+              isOpen: false,
+              isOn: false,
+              role: 'interactive',
+              actions: ['open', 'close', 'enter'],
+              requiredRange: 1,
+              needsLOS: true
+            });
           }
         }
       }
     }
 
     return scenario;
+  }
+
+  /**
+   * C1-3: 获取对面墙方向
+   */
+  function getOppositeWall(wall) {
+    const opposites = { north: 'south', south: 'north', east: 'west', west: 'east' };
+    return opposites[wall] || 'south';
   }
 
   /**
@@ -349,6 +460,47 @@ const RoomTemplates = (() => {
     return Object.keys(ROOM_TEMPLATES);
   }
 
+  /**
+   * B1: 获取玩家进入新房间时的初始位置
+   * 根据连接来源房间的门，找到目标房间中对应的门，在门旁放置玩家
+   * @param {Object} scene - 目标房间场景对象
+   * @param {string} fromRoomId - 来源房间ID
+   * @returns {{x: number, z: number}|null}
+   */
+  function getEntryPosition(scene, fromRoomId) {
+    if (!scene || !fromRoomId) return null;
+
+    // 在目标房间中找到连接来源房间的门
+    const entryDoor = (scene.objects || []).find(o =>
+      o.type === 'door' && o.connectedRoomId === fromRoomId
+    );
+
+    if (entryDoor) {
+      // 在门旁边放置玩家（门的前一格）
+      const dx = entryDoor.gridX || 0;
+      const dz = entryDoor.gridZ || 0;
+      // 根据门所在墙推算"门内侧"位置
+      const wall = entryDoor.wall;
+      let px, pz;
+      switch (wall) {
+        case 'north': px = dx; pz = dz + 1; break;   // 北墙门→往南走一格
+        case 'south': px = dx; pz = dz - 1; break;   // 南墙门→往北走一格
+        case 'west':  px = dx + 1; pz = dz; break;   // 西墙门→往东走一格
+        case 'east':  px = dx - 1; pz = dz; break;   // 东墙门→往西走一格
+        default:      px = dx; pz = dz + 1; break;    // 默认往南
+      }
+      // 边界裁剪
+      const w = scene.width || 6;
+      const h = scene.height || 6;
+      px = Math.max(0, Math.min(px, w - 1));
+      pz = Math.max(0, Math.min(pz, h - 1));
+      return { x: px, z: pz };
+    }
+
+    // 没找到对应门→使用默认生成点
+    return getSpawnPoint(scene.room, scene.width || 6, scene.height || 6);
+  }
+
   return {
     ROOM_TEMPLATES,
     DEFAULT_CONNECTIONS,
@@ -358,7 +510,11 @@ const RoomTemplates = (() => {
     getSpawnPoint,
     applyConnections,
     getConnectedRoom,
-    listTemplateTypes
+    listTemplateTypes,
+    // B1: 入口定位
+    getEntryPosition,
+    // C1-3: 辅助函数
+    getOppositeWall
   };
 
 })();

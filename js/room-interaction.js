@@ -278,11 +278,13 @@ const RoomInteraction = (() => {
     return {
       roomId: scene?.id || scene?.room || 'unknown',
       roomName: scene?.name || '未知房间',
+      roomType: scene?.room || '', // B2: 房间类型，用于描述
       playerPosition: { x: playerPos?.x || 0, y: playerPos?.z || 0 },
       playerFacing: 'NE', // MVP: 固定朝向
       ap,
       turn: 1, // TODO: 接入回合系统
-      objects
+      objects,
+      _scene: scene // B2: 保留场景引用，供describeRoom使用
     };
   }
 
@@ -406,10 +408,7 @@ const RoomInteraction = (() => {
           message: `${target.name}已经是亮着的了。`
         };
       }
-      // 执行开灯/生火
-      if (typeof SceneManager !== 'undefined' && SceneManager.toggleObjectLight) {
-        SceneManager.toggleObjectLight(ref.gridX, ref.gridZ);
-      }
+      // 执行开灯/生火（视觉同步由applyOutcome统一触发）
       const actionText = verb === 'ignite' ? '点燃' : '打开';
       const lightText = ref.type === 'fireplace' ? '火焰很快在可燃物上蔓延开来，微弱的火光照亮了周围。'
         : ref.type === 'candle' ? '你小心翼翼地划亮火柴，点燃了蜡烛。微弱的烛光摇曳着亮了起来。'
@@ -443,10 +442,7 @@ const RoomInteraction = (() => {
           message: `${target.name}并没有亮着。`
         };
       }
-      // 执行关灯/熄火
-      if (typeof SceneManager !== 'undefined' && SceneManager.toggleObjectLight) {
-        SceneManager.toggleObjectLight(ref.gridX, ref.gridZ);
-      }
+      // 执行关灯/熄火（视觉同步由applyOutcome统一触发）
       const actionText = verb === 'extinguish' ? '熄灭了' : '关掉了';
       return {
         success: true,
@@ -470,7 +466,7 @@ const RoomInteraction = (() => {
           };
         }
         if (typeof SceneManager !== 'undefined' && SceneManager.toggleDoor) {
-          SceneManager.toggleDoor(ref.gridX, ref.gridZ);
+          // 视觉同步由applyOutcome统一触发，此处仅做逻辑校验
         }
         return {
           success: true,
@@ -500,8 +496,42 @@ const RoomInteraction = (() => {
       };
     }
 
-    // enter — 进入出口
+    // enter — 进入出口（B1: 对接DMEngine房间切换）
     if (verb === 'enter') {
+      // 检查目标是否是门且已开启
+      if (target.type !== 'door') {
+        return {
+          success: false,
+          code: 'INVALID_TARGET',
+          targetId: target.id,
+          verb,
+          message: `${target.name}不是可以进入的出口。`
+        };
+      }
+      if (!target.isOn) {
+        return {
+          success: false,
+          code: 'DOOR_CLOSED',
+          targetId: target.id,
+          verb,
+          message: `${target.name}是关着的，你需要先打开它。`
+        };
+      }
+      // B1: 调用DMEngine处理门进入
+      if (typeof DMEngine !== 'undefined' && DMEngine.handleDoorInteraction) {
+        const doorResult = DMEngine.handleDoorInteraction(target.gridX, target.gridZ, 'enter');
+        return {
+          success: doorResult.success,
+          code: doorResult.success ? 'OK' : 'BLOCKED',
+          targetId: target.id,
+          verb,
+          message: doorResult.narration,
+          // B1: 传递房间切换元数据
+          nextScene: doorResult.nextScene || null,
+          connectedRoomId: doorResult.connectedRoomId || null,
+          entryFromRoom: doorResult.entryFromRoom || null
+        };
+      }
       return {
         success: true,
         code: 'OK',
@@ -645,7 +675,126 @@ const RoomInteraction = (() => {
   }
 
   // ========== 10. 场景描述函数 ==========
-  function describeRoom(room) {
+  // B2: 动态房间描述 — atmosphere感知 + roomType感知 + visited感知 + 物件状态感知 + 玩家距离感知
+
+  // 房间类型→空间描述映射
+  const ROOM_TYPE_DESCRIPTIONS = {
+    entrance_hall: { first: '一座宽敞的门厅，高挑的天花板让声音在空旷中回荡。', returning: '门厅依旧空旷，脚步声在石板地上回响。', spatial: '大厅四面墙壁环绕' },
+    corridor:     { first: '一条狭长的走廊向前延伸，两侧墙壁几乎触手可及。', returning: '走廊依旧幽暗而狭长。', spatial: '走廊向远处延伸' },
+    library:      { first: '一间布满书架的房间，空气中弥漫着旧纸张的气味。', returning: '图书馆中陈旧的纸香依旧。', spatial: '书架从墙边一直延伸到房间深处' },
+    basement:     { first: '阴冷的地下室，空气中弥漫着潮湿和铁锈的气味。', returning: '地下室的寒意再次包裹了你。', spatial: '低矮的天花板压在头顶' },
+    ritual:       { first: '一间令人不安的房间，地面上刻满了奇怪的符文。', returning: '仪式室中不祥的气息依旧浓重。', spatial: '符文在地面上构成某种图案' },
+    room_small:   { first: '一间狭小的房间，空间局促得让人有些透不过气。', returning: '小房间里的一切都和记忆中一样。', spatial: '紧凑的空间中' },
+    room_medium:  { first: '一间中等大小的房间，陈设简单。', returning: '房间里的布局没有变化。', spatial: '房间中央留有活动空间' },
+    room_large:   { first: '一间宽敞的大房间，四周的阴影似乎藏着什么。', returning: '大房间里依旧安静。', spatial: '开阔的空间向四周展开' }
+  };
+
+  // 氛围等级→文本描述
+  function describeAtmosphere(atmosphere, litCount) {
+    if (!atmosphere) return '';
+    const fog = atmosphere.fogDensity || 0;
+    const ambient = atmosphere.ambientIntensity || 0;
+    const lightInt = atmosphere.lightIntensity || 0;
+    const parts = [];
+
+    // 雾气描述
+    if (fog > 0.028) {
+      parts.push('浓重的迷雾几乎吞没了一切，');
+    } else if (fog > 0.022) {
+      parts.push('薄雾在空气中缓缓流动，');
+    } else if (fog > 0.015) {
+      parts.push('空气中漂浮着细微的尘埃，');
+    }
+
+    // 环境光描述（与灯光叠加）
+    if (litCount === 0) {
+      if (ambient < 0.2) {
+        parts.push('黑暗如潮水般从四面涌来。');
+      } else if (ambient < 0.35) {
+        parts.push('微弱的光线勉强勾勒出空间的轮廓。');
+      }
+    } else {
+      // 有灯光时，结合灯光强度和环境光描述
+      if (lightInt < 0.4) {
+        parts.push('光线昏沉，阴影在角落里蠢蠢欲动。');
+      } else if (lightInt > 0.7) {
+        parts.push('光线充足，房间中的细节一览无余。');
+      }
+    }
+
+    return parts.join('');
+  }
+
+  // 物件状态感知描述
+  function describeObjectState(obj) {
+    const ref = obj._ref;
+    if (!ref) return '';
+    const parts = [];
+
+    // 可搜索物件的状态（chest/crate/wardrobe/desk）
+    if (ref.type === 'chest' || ref.type === 'crate' || ref.type === 'wardrobe') {
+      if (obj.state?.searched) {
+        parts.push('，已经被翻找过了');
+      } else if (obj.state?.open) {
+        parts.push('，盖子敞开着');
+      }
+    }
+    // 书架
+    if (ref.type === 'bookshelf' || ref.type === 'desk') {
+      if (obj.state?.searched) {
+        parts.push('，书已经被翻乱了');
+      }
+    }
+    // 灯光状态补充
+    if (ref.isLight) {
+      if (ref.isOn) {
+        if (ref.type === 'fireplace') parts.push('，火焰跳动着');
+        else if (ref.type === 'candle') parts.push('，烛光摇曳');
+        else parts.push('，亮着');
+      } else {
+        parts.push('，熄灭了');
+      }
+    }
+
+    return parts.join('');
+  }
+
+  // 玩家距离→细节等级
+  function getProximityDetail(obj, playerPos) {
+    if (!playerPos || !obj._ref) return 0; // 0=无距离信息，走旧逻辑
+    const dx = (obj._ref.gridX || 0) - playerPos.x;
+    const dz = (obj._ref.gridZ || 0) - playerPos.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist <= 1.5) return 2;  // 近距离：详细描述
+    if (dist <= 3.0) return 1;  // 中距离：正常描述
+    return 0;                    // 远距离：简略描述
+  }
+
+  // 门目的地提示
+  function describeDoorDestination(door, scene) {
+    const ref = door._ref;
+    if (!ref || !ref.isOn) return ''; // 只对开着的门提供提示
+    const connectedId = ref.connectedRoomId || door.connectedRoomId;
+    if (!connectedId || !scene) return '';
+    // 从gameState.rooms中获取目标房间名
+    const gs = (typeof DMEngine !== 'undefined') ? DMEngine.getGameState() : null;
+    if (gs && gs.rooms && gs.rooms[connectedId]) {
+      const targetName = gs.rooms[connectedId].name;
+      if (gs.rooms[connectedId].visited) {
+        return `，通向${targetName}`;
+      }
+      return '，通向未知的方向';
+    }
+    return '，通向未知的方向';
+  }
+
+  /**
+   * 动态房间描述 — B2升级版
+   * @param {Object} room - RoomState（由buildRoomState构建）
+   * @param {Object} [scene] - DMEngine场景数据（含atmosphere/room/narration等）
+   * @param {{x:number,z:number}} [playerPos] - 玩家格子坐标
+   */
+  function describeRoom(room, scene, playerPos) {
     const visible = room.objects.filter(o => o.visible);       // EXPLORED: 当前在视野内
     const knownButHidden = room.objects.filter(o => !o.visible && o.discovered); // KNOWN: 曾经见过但当前不在视野
 
@@ -654,45 +803,170 @@ const RoomInteraction = (() => {
     const doors = visible.filter(o => o.type === 'door' || o._ref?.type === 'door');
     const furniture = visible.filter(o => !o._ref?.isLight && o._ref?.type !== 'door');
     const litLights = lights.filter(o => o._ref?.isOn);
+    const unlitLights = lights.filter(o => !o._ref?.isOn);
 
     const parts = [];
 
-    // 房间基本描述
-    parts.push(`你身处${room.roomName}。`);
+    // ---- B2-1: 房间类型感知描述 ----
+    const roomType = scene?.room || '';
+    const typeDesc = ROOM_TYPE_DESCRIPTIONS[roomType];
 
-    // 光照状况
-    if (litLights.length > 0) {
-      parts.push('房间里有微弱的光源。');
+    // 判断是否首次访问
+    const gs = (typeof DMEngine !== 'undefined') ? DMEngine.getGameState() : null;
+    const sceneId = scene?.id || room.roomId;
+    const isFirstVisit = !gs || !gs.rooms || !gs.rooms[sceneId] || !gs.rooms[sceneId].visited;
+
+    if (typeDesc) {
+      if (isFirstVisit) {
+        parts.push(typeDesc.first);
+      } else {
+        parts.push(typeDesc.returning);
+      }
     } else {
-      parts.push('四周一片昏暗。');
+      // 无模板匹配时用旧逻辑
+      parts.push(`你身处${room.roomName}。`);
     }
 
-    // 当前可见物件（EXPLORED状态）
-    if (furniture.length > 0) {
-      const names = furniture.slice(0, 5).map(o => o.name);
-      if (furniture.length <= 3) {
-        parts.push(`你能看见${names.join('、')}。`);
+    // ---- B2-2: 氛围感知描述 ----
+    const atmosphereText = describeAtmosphere(scene?.atmosphere, litLights.length);
+    if (atmosphereText) {
+      parts.push(atmosphereText);
+    }
+
+    // ---- A1: 光照状况 — 根据灯光类型和数量动态描述（保留+增强） ----
+    if (litLights.length === 0) {
+      // 只有在氛围描述没有覆盖"黑暗"时才补充
+      if (!atmosphereText || (!atmosphereText.includes('黑暗') && !atmosphereText.includes('昏'))) {
+        parts.push('四周一片昏暗，什么都看不太清。');
+      }
+    } else if (litLights.length === 1) {
+      const light = litLights[0];
+      const lightName = light.name;
+      if (light._ref?.type === 'fireplace') {
+        parts.push('壁炉中的火焰跳动着，暖红色的光映在墙壁上，勉强照亮了房间。');
+      } else if (light._ref?.type === 'candle') {
+        parts.push(`${lightName}的烛光摇曳不定，微弱的光芒在黑暗中挣扎。`);
       } else {
-        parts.push(`你能看见${names.slice(0, 3).join('、')}等物件。`);
+        parts.push(`${lightName}发出昏黄的光，驱散了周围的部分黑暗。`);
+      }
+    } else {
+      // 多个光源
+      const lightNames = litLights.map(o => o.name);
+      parts.push(`${lightNames.join('和')}的光芒交织在一起，房间比刚才明亮了许多。`);
+    }
+
+    // ---- B2-3: 空间布局提示 ----
+    if (typeDesc && typeDesc.spatial && isFirstVisit) {
+      parts.push(typeDesc.spatial + '。');
+    }
+
+    // ---- B2-4: 可见物件 — 玩家距离感知 + 物件状态感知 ----
+    if (furniture.length > 0) {
+      if (playerPos) {
+        // 按距离排序，近的优先描述
+        const sorted = [...furniture].sort((a, b) => {
+          const da = Math.hypot((a._ref?.gridX || 0) - playerPos.x, (a._ref?.gridZ || 0) - playerPos.z);
+          const db = Math.hypot((b._ref?.gridX || 0) - playerPos.x, (b._ref?.gridZ || 0) - playerPos.z);
+          return da - db;
+        });
+        const nearObjs = sorted.filter(o => getProximityDetail(o, playerPos) >= 1);
+        const farObjs = sorted.filter(o => getProximityDetail(o, playerPos) === 0);
+
+        if (litLights.length === 0) {
+          // 无灯光：模糊辨认
+          const dimNames = sorted.slice(0, 2).map(o => o.name);
+          parts.push(`黑暗中你隐约能辨认出${dimNames.join('和')}的轮廓。`);
+        } else {
+          // 近距离物件：带状态描述
+          if (nearObjs.length > 0) {
+            const nearDescs = nearObjs.slice(0, 3).map(o => {
+              const stateText = describeObjectState(o);
+              return o.name + stateText;
+            });
+            parts.push(`近处你能看见${nearDescs.join('、')}。`);
+          }
+          // 远距离物件：简略
+          if (farObjs.length > 0) {
+            const farNames = farObjs.slice(0, 3).map(o => o.name);
+            if (farObjs.length <= 2) {
+              parts.push(`远处还有${farNames.join('和')}。`);
+            } else {
+              parts.push(`远处还能看到${farNames.join('、')}等物件。`);
+            }
+          }
+        }
+      } else {
+        // 无玩家位置信息，走旧逻辑
+        const names = furniture.slice(0, 5).map(o => o.name);
+        if (litLights.length === 0) {
+          if (furniture.length <= 2) {
+            parts.push(`黑暗中你隐约能辨认出${names.join('和')}的轮廓。`);
+          } else {
+            parts.push(`黑暗中你隐约能辨认出${names.slice(0, 2).join('和')}等模糊的轮廓。`);
+          }
+        } else {
+          if (furniture.length <= 3) {
+            parts.push(`你能看见${names.join('、')}。`);
+          } else {
+            parts.push(`你能看见${names.slice(0, 3).join('、')}等物件。`);
+          }
+        }
       }
     }
 
-    // 灯光物件
-    const unlitLights = lights.filter(o => !o._ref?.isOn);
+    // 未点亮的灯光物件
     if (unlitLights.length > 0) {
       const lightNames = unlitLights.map(o => o.name);
       parts.push(`${lightNames.join('、')}还没有点亮。`);
     }
 
-    // 出口
+    // ---- B2-5: 出口 — 门状态 + 目的地提示 ----
     if (doors.length > 0) {
-      parts.push('房间里有门。');
+      const openDoors = doors.filter(o => o._ref?.isOn); // door的isOn=isOpen
+      const closedDoors = doors.filter(o => !o._ref?.isOn);
+
+      if (openDoors.length > 0) {
+        // 开着的门：带目的地提示
+        const openDescs = openDoors.map(d => {
+          const destHint = describeDoorDestination(d, scene);
+          return '一扇敞开的门' + destHint;
+        });
+        if (closedDoors.length > 0) {
+          parts.push(openDescs[0] + '，另一扇门紧闭着。');
+        } else if (openDoors.length === 1) {
+          parts.push(openDescs[0] + '。');
+        } else {
+          parts.push(openDescs.join('；') + '。');
+        }
+      } else if (closedDoors.length > 0) {
+        // 全部关闭
+        if (closedDoors.length === 1) {
+          parts.push('一扇门紧闭着。');
+        } else {
+          parts.push(`${closedDoors.length}扇门都紧闭着。`);
+        }
+      }
     }
 
     // 模糊记忆中的物件（KNOWN状态，不在当前视野但曾经见过）
     if (knownButHidden.length > 0) {
       const dimNames = knownButHidden.slice(0, 3).map(o => o.name);
-      parts.push(`在阴影的边缘，你隐约记得那边有${dimNames.join('、')}的轮廓。`);
+      if (litLights.length > 0) {
+        parts.push(`在光线照不到的角落，你隐约记得那边有${dimNames.join('、')}的轮廓。`);
+      } else {
+        parts.push(`在黑暗的边缘，你隐约记得那边有${dimNames.join('、')}的轮廓。`);
+      }
+    }
+
+    // ---- B2-6: 首次进入时附加场景叙述 ----
+    if (isFirstVisit && scene?.narration) {
+      // 避免与已有描述重复：只取叙述的后半段（场景叙述通常以环境描写开头，与上面重叠）
+      const narLines = scene.narration.split(/[。！？]/).filter(s => s.trim());
+      if (narLines.length > 1) {
+        // 取最后1-2句作为补充氛围
+        const tail = narLines.slice(-2).join('。');
+        parts.push(tail + '。');
+      }
     }
 
     return parts.join('');
@@ -715,7 +989,7 @@ const RoomInteraction = (() => {
       return {
         success: true,
         code: 'OK',
-        message: describeRoom(room)
+        message: describeRoom(room, room._scene, room.playerPosition)
       };
     }
 

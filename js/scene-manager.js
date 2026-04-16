@@ -2800,17 +2800,35 @@ const SceneManager = (() => {
   }
 
   // ========== 开门/关门 ==========
-  function toggleDoor(gx, gz) {
+  // on: undefined=toggle, true=强制开, false=强制关
+  function toggleDoor(gx, gz, on) {
     var obj = sceneObjects.find(o => o.gridX === gx && o.gridZ === gz && o.type === 'door');
     if (!obj) return null;
     
-    obj.isOn = !obj.isOn;
+    var nextOn = (on !== undefined) ? !!on : !obj.isOn;
+    // 状态未变则直接返回（幂等）
+    if (nextOn === obj.isOn) return obj.isOn;
+
+    obj.isOn = nextOn;
+    obj.isOpen = nextOn; // 同步isOpen
     if (obj.isOn) {
-      obj.group.visible = false;
+      // 开门：隐藏门板，取消阻挡
+      var doorPanel = obj.group.children.find(c => c.name === 'doorPanel');
+      if (doorPanel) {
+        doorPanel.visible = false;
+      } else {
+        obj.group.visible = false;
+      }
       obj.blockMove = false;
       obj.hint = '🚪 关门';
     } else {
-      obj.group.visible = true;
+      // 关门：显示门板，恢复阻挡
+      var doorPanel2 = obj.group.children.find(c => c.name === 'doorPanel');
+      if (doorPanel2) {
+        doorPanel2.visible = true;
+      } else {
+        obj.group.visible = true;
+      }
       obj.blockMove = true;
       obj.hint = '🚪 打开门';
     }

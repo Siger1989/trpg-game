@@ -15,6 +15,125 @@ const DMEngine = (() => {
   let facts = [];
   let npcStates = {};
 
+  // ========== B1: 房间状态缓存 ==========
+  // 切换房间前保存当前房间物件状态，返回时恢复
+  const roomStateCache = {};
+
+  /**
+   * 保存当前房间的物件状态到缓存
+   * @param {string} sceneId - 场景ID
+   */
+  function saveRoomState(sceneId) {
+    if (!sceneId) return;
+    const scene = getCurrentScene();
+    if (!scene) return;
+    // 保存SceneManager中当前可见物件的状态
+    const states = [];
+    if (typeof SceneManager !== 'undefined' && SceneManager.sceneObjects) {
+      SceneManager.sceneObjects.forEach(obj => {
+        states.push({
+          id: obj.id,
+          gridX: obj.gridX,
+          gridZ: obj.gridZ,
+          type: obj.type,
+          isOn: obj.isOn,
+          isOpen: obj.isOpen,
+          visible: obj.visible,
+          blockMove: obj.blockMove
+        });
+      });
+    }
+    // 也保存gameState中的物件状态
+    const gsObjects = getRoomObjects(sceneId);
+    roomStateCache[sceneId] = {
+      sceneObjects: states,
+      gameStateObjects: gsObjects.map(o => ({ ...o })),
+      savedAt: Date.now()
+    };
+    console.log(`[B1] 已保存房间状态: ${sceneId}, ${states.length}个物件`);
+  }
+
+  /**
+   * 从缓存恢复房间物件状态
+   * @param {string} sceneId - 场景ID
+   * @returns {boolean} 是否有缓存可恢复
+   */
+  function restoreRoomState(sceneId) {
+    if (!sceneId || !roomStateCache[sceneId]) return false;
+    const cached = roomStateCache[sceneId];
+    // 恢复gameState中的物件状态
+    if (gameState && gameState.objects && cached.gameStateObjects) {
+      cached.gameStateObjects.forEach(cachedObj => {
+        const liveObj = gameState.objects.find(o => o.id === cachedObj.id);
+        if (liveObj) {
+          // 只恢复可变状态，不覆盖位置等固有属性
+          liveObj.isOn = cachedObj.isOn;
+          liveObj.isOpen = cachedObj.isOpen;
+          liveObj.visible = cachedObj.visible;
+          liveObj.state = cachedObj.state;
+          liveObj.searchCount = cachedObj.searchCount;
+          liveObj.taken = cachedObj.taken;
+        }
+      });
+    }
+    console.log(`[B1] 已恢复房间状态缓存: ${sceneId}`);
+    return true;
+  }
+
+  /**
+   * 切换到指定房间（B1核心方法）
+   * 1. 保存当前房间状态
+   * 2. 切换worldState.currentSceneIndex
+   * 3. 恢复目标房间状态（如有缓存）
+   * @param {string} targetSceneId - 目标场景ID
+   * @param {string} fromSceneId - 来源场景ID（用于入口定位）
+   * @returns {{ success: boolean, nextScene: Object|null, entryFromRoom: string|null }}
+   */
+  function switchToRoom(targetSceneId, fromSceneId) {
+    const scenario = getActiveScenario();
+    if (!scenario) return { success: false, nextScene: null, entryFromRoom: null };
+
+    const targetIndex = scenario.scenes.findIndex(s => s.id === targetSceneId);
+    if (targetIndex < 0) return { success: false, nextScene: null, entryFromRoom: null };
+
+    // 1. 保存当前房间状态
+    const currentScene = getCurrentScene();
+    if (currentScene) {
+      saveRoomState(currentScene.id);
+    }
+
+    // 2. 切换场景索引
+    worldState.currentSceneIndex = targetIndex;
+    addFact('location', scenario.scenes[targetIndex].name);
+
+    // 3. 标记目标房间已访问
+    if (gameState && gameState.rooms && gameState.rooms[targetSceneId]) {
+      gameState.rooms[targetSceneId].visited = true;
+    }
+
+    // 4. 恢复目标房间状态（如有缓存）
+    const hasCache = restoreRoomState(targetSceneId);
+
+    return {
+      success: true,
+      nextScene: scenario.scenes[targetIndex],
+      entryFromRoom: fromSceneId || null,
+      hadCachedState: hasCache
+    };
+  }
+
+  /**
+   * 获取指定场景中连接回来源房间的门
+   * @param {string} sceneId - 场景ID
+   * @param {string} fromRoomId - 来源房间ID
+   * @returns {Object|null} 门对象
+   */
+  function findDoorToRoom(sceneId, fromRoomId) {
+    const scene = getActiveScenario()?.scenes.find(s => s.id === sceneId);
+    if (!scene || !scene.objects) return null;
+    return scene.objects.find(o => o.type === 'door' && o.connectedRoomId === fromRoomId) || null;
+  }
+
   // ========== 对象状态机 ==========
   const OBJECT_STATES = { UNSEARCHED: 'unsearched', CLUE_FOUND: 'clue_found', RESOLVED: 'resolved' };
   const OBJECT_DEFAULTS = {
@@ -291,6 +410,13 @@ const DMEngine = (() => {
         }
       }
     }
+
+    // C1-4: 在所有场景编译和transitions构建完成后，应用门连接
+    if (typeof RoomTemplates !== 'undefined' && RoomTemplates.applyConnections) {
+      RoomTemplates.applyConnections(scenario);
+      console.log(`[DMEngine] 门连接已应用: ${scenario.scenes.length}个场景`);
+    }
+
     return scenario;
   }
 
@@ -305,23 +431,88 @@ const DMEngine = (() => {
     }
 
     try {
-      // 构建编译器输入格式
-      const spec = {
-        scene_id: rawScene.id,
-        room_type: rawScene.room,
-        shape: SceneCompiler.ROOM_TYPE_DEFAULTS?.[rawScene.room]?.defaultShape || 'rect',
-        size: { w: rawScene.width, h: rawScene.height },
-        objects: (rawScene.objects || []).map(o => ({
-          type: o.type,
-          role: SceneCompiler.TYPE_DEFAULTS?.[o.type]?.role || 'atmosphere',
-          zone: o.zone || null,
-          near: o.near || null
-        })),
-        mood: mood || 'neutral',
-        fog_density: rawScene.atmosphere?.fogDensity || 0.025,
-        ambient_light: rawScene.atmosphere?.ambientIntensity || 0.5,
-        connections: []
-      };
+      // C3-3: 检测语义蓝图格式（AI返回focalObjects/searchables/layoutNotes而非原始objects）
+      const isSemanticBlueprint = (
+        Array.isArray(rawScene.focalObjects) ||
+        Array.isArray(rawScene.searchables) ||
+        Array.isArray(rawScene.layoutNotes)
+      );
+
+      let spec;
+
+      if (isSemanticBlueprint && SceneCompiler.parseSemanticBlueprint) {
+        // C3-3: 语义蓝图路径 — AI只给语义描述，编译器负责空间化
+        const blueprint = {
+          roomType: rawScene.roomType || rawScene.room,
+          atmosphere: rawScene.atmosphere,
+          connections: rawScene.connections,
+          focalObjects: rawScene.focalObjects,
+          searchables: rawScene.searchables,
+          layoutNotes: rawScene.layoutNotes,
+          size: rawScene.width ? { w: rawScene.width, h: rawScene.height } : undefined,
+          mood: mood
+        };
+        spec = SceneCompiler.parseSemanticBlueprint(blueprint);
+        if (!spec) {
+          console.warn('[SceneCompiler] 语义蓝图解析失败，降级到传统路径');
+          // 降级到传统路径
+          spec = null;
+        } else {
+          // 合并原始场景的连接信息（如果蓝图未提供）
+          if (!spec.connections || spec.connections.length === 0) {
+            const doorObjects = (rawScene.objects || []).filter(o => o.type === 'door');
+            if (doorObjects.length > 0) {
+              spec.connections = doorObjects.map(d => ({
+                direction: d.wall || 'south',
+                target: d.connectedRoomId || 'unknown',
+                type: d.portal ? 'portal' : 'door'
+              }));
+            }
+          }
+          // 确保scene_id正确
+          spec.scene_id = rawScene.id;
+          console.log(`[SceneCompiler] 语义蓝图解析成功: ${spec.objects?.length || 0}个物件, 房型${spec.room_type}`);
+        }
+      }
+
+      if (!spec) {
+        // 传统路径：从rawScene.objects直接构建spec
+        // C1-1: 从rawScene中提取门连接数据
+        const doorObjects = (rawScene.objects || []).filter(o => o.type === 'door');
+        const connections = doorObjects.map(d => ({
+          direction: d.wall || 'south',
+          target: d.connectedRoomId || 'unknown',
+          type: d.portal ? 'portal' : 'door'
+        }));
+
+        // C1-2: 保留原始物件的zone信息（基于已有位置推断）
+        const specObjects = (rawScene.objects || []).map(o => {
+          const specObj = {
+            type: o.type,
+            role: o.role || SceneCompiler.TYPE_DEFAULTS?.[o.type]?.role || 'atmosphere',
+            zone: o.zone || null,
+            near: o.near || null
+          };
+          // C1-2: 如果物件已有位置，推断zone给编译器参考
+          if (o.x !== undefined && o.z !== undefined && !specObj.zone) {
+            specObj.zone = inferZoneFromPosition(o.x, o.z, rawScene.width || 5, rawScene.height || 5);
+          }
+          return specObj;
+        });
+
+        // 构建编译器输入格式
+        spec = {
+          scene_id: rawScene.id,
+          room_type: rawScene.room,
+          shape: SceneCompiler.ROOM_TYPE_DEFAULTS?.[rawScene.room]?.defaultShape || 'rect',
+          size: { w: rawScene.width, h: rawScene.height },
+          objects: specObjects,
+          mood: mood || 'neutral',
+          fog_density: rawScene.atmosphere?.fogDensity || 0.025,
+          ambient_light: rawScene.atmosphere?.ambientIntensity || 0.5,
+          connections: connections
+        };
+      }
 
       // 规范化+编译
       const normalized = SceneCompiler.normalizeSceneSpec(spec);
@@ -330,7 +521,43 @@ const DMEngine = (() => {
       const compiled = SceneCompiler.compileScene(normalized);
       if (!compiled) return rawScene;
 
+      // C1-1: 将编译后的connections转换回门对象，合并到objects中
+      const compiledDoors = (compiled.connections || []).map((conn, i) => {
+        const pos = calcDoorPosition(conn.direction, compiled.size.w, compiled.size.h);
+        return {
+          type: 'door',
+          x: pos.x,
+          z: pos.z,
+          wall: conn.direction,
+          connectedRoomId: conn.target,
+          portal: conn.type === 'portal' || !!conn.target,
+          isOpen: false,
+          isOn: false,
+          role: 'interactive',
+          actions: ['open', 'close', 'enter'],
+          requiredRange: 1,
+          needsLOS: true
+        };
+      });
+
       // 编译成功：转换回DMEngine场景格式
+      // 过滤掉编译器可能生成的door类型（用connections转换的门替代）
+      const compiledObjects = compiled.objects
+        .filter(o => o.type !== 'door')
+        .map(o => ({
+          type: o.type,
+          x: o.x,
+          z: o.z,
+          // 保留编译器生成的交互元数据
+          role: o.role,
+          actions: o.actions,
+          requiredRange: o.requiredRange,
+          needsLOS: o.needsLOS
+        }));
+
+      // 合并：编译器物件 + 连接转换的门
+      const allObjects = [...compiledObjects, ...compiledDoors];
+
       const compiledScene = {
         id: compiled.scene_id,
         name: rawScene.name,
@@ -344,27 +571,55 @@ const DMEngine = (() => {
           lightIntensity: rawScene.atmosphere?.lightIntensity || 0.5,
           mood: compiled.atmosphere.mood
         },
-        objects: compiled.objects.map(o => ({
-          type: o.type,
-          x: o.x,
-          z: o.z,
-          // 保留编译器生成的交互元数据
-          role: o.role,
-          actions: o.actions,
-          requiredRange: o.requiredRange,
-          needsLOS: o.needsLOS
-        })),
+        objects: allObjects,
         narration: rawScene.narration || SceneCompiler.generateNarration(compiled),
         choices: rawScene.choices || [],
         enemies: rawScene.enemies || []
       };
 
-      console.log(`[SceneCompiler] 场景"${compiledScene.name}"编译成功: ${compiled.objects.length}个物件, ${compiled.size.w}x${compiled.size.h}`);
+      console.log(`[SceneCompiler] 场景"${compiledScene.name}"编译成功: ${allObjects.length}个物件(含${compiledDoors.length}门), ${compiled.size.w}x${compiled.size.h}`);
       return compiledScene;
 
     } catch (err) {
       console.warn('[SceneCompiler] 编译失败，降级到原始场景:', err);
       return rawScene;
+    }
+  }
+
+  /**
+   * C1-2: 根据物件位置推断zone信息
+   * 帮助SceneCompiler理解物件的空间意图
+   */
+  function inferZoneFromPosition(x, z, w, h) {
+    const isNearWall_n = z <= 1;
+    const isNearWall_s = z >= h - 2;
+    const isNearWall_w = x <= 1;
+    const isNearWall_e = x >= w - 2;
+    const isCenter = x >= Math.floor(w * 0.3) && x <= Math.floor(w * 0.7)
+                  && z >= Math.floor(h * 0.3) && z <= Math.floor(h * 0.7);
+
+    if (isCenter) return 'center';
+    if (isNearWall_n && isNearWall_w) return 'corner_nw';
+    if (isNearWall_n && isNearWall_e) return 'corner_ne';
+    if (isNearWall_s && isNearWall_w) return 'corner_sw';
+    if (isNearWall_s && isNearWall_e) return 'corner_se';
+    if (isNearWall_n) return 'wall_north';
+    if (isNearWall_s) return 'wall_south';
+    if (isNearWall_w) return 'wall_west';
+    if (isNearWall_e) return 'wall_east';
+    return 'near_center';
+  }
+
+  /**
+   * C1-1: 根据方向计算门在房间中的位置
+   */
+  function calcDoorPosition(direction, w, h) {
+    switch (direction) {
+      case 'north': return { x: Math.floor(w / 2), z: 0 };
+      case 'south': return { x: Math.floor(w / 2), z: h - 1 };
+      case 'west':  return { x: 0, z: Math.floor(h / 2) };
+      case 'east':  return { x: w - 1, z: Math.floor(h / 2) };
+      default:      return { x: Math.floor(w / 2), z: 0 };
     }
   }
 
@@ -615,6 +870,11 @@ const DMEngine = (() => {
         Object.assign(scene, compiled);
       }
     });
+    // C1-4: 编译完成后应用门连接
+    if (typeof RoomTemplates !== 'undefined' && RoomTemplates.applyConnections) {
+      RoomTemplates.applyConnections(data);
+      console.log(`[DMEngine] validateAndFixScenario: 门连接已应用`);
+    }
     return data;
   }
 
@@ -1085,6 +1345,23 @@ const DMEngine = (() => {
                 } else {
                   sceneObj[change.field] = change.value;
                 }
+                // A1: 灯光状态变更→自动触发3D视觉同步
+                // 先还原sceneObj状态，让toggle函数自己管理（避免幂等检查跳过）
+                if (change.field === 'isOn' && sceneObj.isLight) {
+                  if (typeof SceneManager.toggleObjectLight === 'function') {
+                    sceneObj.isOn = !change.value; // 还原，让toggle检测到变化
+                    SceneManager.toggleObjectLight(change.gx, change.gz, change.value);
+                  }
+                  renderNeeded = true;
+                }
+                // A2: 门状态变更→自动触发3D视觉同步
+                if (change.field === 'isOpen' && sceneObj.type === 'door') {
+                  if (typeof SceneManager.toggleDoor === 'function') {
+                    sceneObj.isOn = !change.value; // door的isOn=isOpen，还原让toggle检测到变化
+                    SceneManager.toggleDoor(change.gx, change.gz, change.value);
+                  }
+                  renderNeeded = true;
+                }
               }
             }
             break;
@@ -1200,30 +1477,39 @@ const DMEngine = (() => {
       if (isOpen) {
         return { success: false, narration: '门已经是开着的。' };
       }
-      // 开门
-      if (doorObj) { doorObj.isOpen = true; doorObj.isOn = true; doorObj.state = 'open'; }
-      if (sceneDoor) { sceneDoor.isOn = true; }
-      if (typeof SceneManager !== 'undefined' && SceneManager.toggleDoor) {
-        SceneManager.toggleDoor(gx, gz);
-      }
+      // 开门 — 通过ActionOutcome统一驱动，视觉同步由applyOutcome()触发
+      const outcome = {
+        success: true,
+        narration: '',
+        requiresRender: true,
+        stateChanges: [
+          { objectId: doorObj?.id || sceneDoor?.id, type: 'object', field: 'isOpen', value: true, gx, gz }
+        ]
+      };
 
       let narration = '你推开了门，门轴发出刺耳的声响。';
       if (isPortal && connectedRoomId) {
         narration += ` 门后通向另一个房间。`;
       }
-      return { success: true, narration, connectedRoomId, isPortal, requiresRender: true };
+      outcome.narration = narration;
+      outcome.connectedRoomId = connectedRoomId;
+      outcome.isPortal = isPortal;
+      return outcome;
     }
 
     if (action === 'close') {
       if (!isOpen) {
         return { success: false, narration: '门本来就是关着的。' };
       }
-      if (doorObj) { doorObj.isOpen = false; doorObj.isOn = false; doorObj.state = 'closed'; }
-      if (sceneDoor) { sceneDoor.isOn = false; }
-      if (typeof SceneManager !== 'undefined' && SceneManager.toggleDoor) {
-        SceneManager.toggleDoor(gx, gz);
-      }
-      return { success: true, narration: '你关上了门。', requiresRender: true };
+      // 关门 — 通过ActionOutcome统一驱动，视觉同步由applyOutcome()触发
+      return {
+        success: true,
+        narration: '你关上了门。',
+        requiresRender: true,
+        stateChanges: [
+          { objectId: doorObj?.id || sceneDoor?.id, type: 'object', field: 'isOpen', value: false, gx, gz }
+        ]
+      };
     }
 
     if (action === 'enter') {
@@ -1233,21 +1519,19 @@ const DMEngine = (() => {
       if (!isPortal || !connectedRoomId) {
         return { success: false, narration: '这扇门似乎通向死路。' };
       }
-      // 切换到连接的房间
-      const scenario = getActiveScenario();
-      if (scenario) {
-        const sceneIndex = scenario.scenes.findIndex(s => s.id === connectedRoomId);
-        if (sceneIndex >= 0) {
-          worldState.currentSceneIndex = sceneIndex;
-          addFact('location', scenario.scenes[sceneIndex].name);
-          return {
-            success: true,
-            narration: `你穿过了门...`,
-            nextScene: scenario.scenes[sceneIndex],
-            connectedRoomId,
-            requiresRender: true
-          };
-        }
+      // B1: 通过switchToRoom统一切换，自动保存/恢复房间状态
+      const currentScene = getCurrentScene();
+      const fromSceneId = currentScene ? currentScene.id : null;
+      const switchResult = switchToRoom(connectedRoomId, fromSceneId);
+      if (switchResult.success) {
+        return {
+          success: true,
+          narration: `你穿过了门...`,
+          nextScene: switchResult.nextScene,
+          connectedRoomId,
+          entryFromRoom: fromSceneId,
+          requiresRender: true
+        };
       }
       return { success: false, narration: '门后似乎没有出路。' };
     }
@@ -1323,6 +1607,14 @@ const DMEngine = (() => {
       }
     }
 
+    // 校验4: 视线检查（C2增强 - 对needsLOS物件检查视线遮挡）
+    if (obj.needsLOS && typeof SceneManager !== 'undefined' && SceneManager.hasLineOfSight) {
+      const playerPos = gameState.playerPosition || { x: 0, z: 0 };
+      if (!SceneManager.hasLineOfSight(playerPos.x, playerPos.z, gx, gz)) {
+        return { valid: false, reason: 'los_blocked', feedback: '你的视线被挡住了，无法直接看到那个目标。' };
+      }
+    }
+
     return { valid: true, reason: null, feedback: null };
   }
 
@@ -1387,6 +1679,8 @@ const DMEngine = (() => {
     getGameState, registerPlayer,
     getObjectState, setObjectState, getRoomObjects,
     advanceObjectState, canSearchObject,
-    OBJECT_STATES
+    OBJECT_STATES,
+    // ===== B1: 房间切换API =====
+    switchToRoom, saveRoomState, restoreRoomState, findDoorToRoom
   };
 })();
