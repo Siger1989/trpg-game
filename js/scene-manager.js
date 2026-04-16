@@ -958,6 +958,7 @@ const SceneManager = (() => {
   function initGridClick(container) {
     raycaster = new THREE.Raycaster();
     const canvas = renderer.domElement;
+    console.log('[SceneManager] initGridClick 已初始化, canvas:', canvas ? 'OK' : 'NULL');
 
     // 点击事件（区分点击和拖拽）
     let mouseDownPos = null;
@@ -973,8 +974,10 @@ const SceneManager = (() => {
       const dx = e.clientX - mouseDownPos.x;
       const dy = e.clientY - mouseDownPos.y;
       const dt = performance.now() - mouseDownTime;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      console.log('[SceneManager] pointerup: dist=' + dist.toFixed(1) + ' dt=' + dt.toFixed(0) + 'ms floorMesh=' + (floorMesh ? 'OK' : 'NULL'));
       // 短距离+短时间=点击，否则是拖拽
-      if (Math.sqrt(dx*dx + dy*dy) < 10 && dt < 500) {
+      if (dist < 15 && dt < 500) {
         handleSceneClick(e);
       }
       mouseDownPos = null;
@@ -982,8 +985,8 @@ const SceneManager = (() => {
   }
 
   function handleSceneClick(e) {
-    if (!camera || !currentRoom || !floorMesh) {
-      console.warn('[SceneManager] 点击检测跳过:', { hasCamera: !!camera, hasRoom: !!currentRoom, hasFloor: !!floorMesh });
+    if (!camera || !currentRoom) {
+      console.warn('[SceneManager] 点击检测跳过: camera=' + !!camera + ' room=' + !!currentRoom);
       return;
     }
 
@@ -994,17 +997,39 @@ const SceneManager = (() => {
     );
 
     raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObject(floorMesh);
-    if (intersects.length === 0) {
-      console.log('[SceneManager] raycast未命中地板');
+    
+    // 尝试raycast地板
+    let grid = null;
+    if (floorMesh) {
+      const intersects = raycaster.intersectObject(floorMesh);
+      if (intersects.length > 0) {
+        const point = intersects[0].point;
+        grid = worldToGrid(point.x, point.z);
+        console.log('[SceneManager] raycast命中地板, 世界坐标:', point, '→ 格子:', grid);
+      }
+    }
+    
+    // 如果地板没命中，尝试所有场景对象（包括格子线等）
+    if (!grid) {
+      const allObjects = [];
+      scene.traverse(obj => { if (obj.isMesh) allObjects.push(obj); });
+      const intersects = raycaster.intersectObjects(allObjects);
+      if (intersects.length > 0) {
+        const point = intersects[0].point;
+        grid = worldToGrid(point.x, point.z);
+        console.log('[SceneManager] raycast命中场景对象, 世界坐标:', point, '→ 格子:', grid, '对象:', intersects[0].object.name || intersects[0].object.type);
+      }
+    }
+    
+    if (!grid) {
+      console.log('[SceneManager] raycast未命中任何对象, floorMesh=' + !!floorMesh + ' mouse=' + mouse.x.toFixed(2) + ',' + mouse.y.toFixed(2));
       return;
     }
 
-    const point = intersects[0].point;
-    const grid = worldToGrid(point.x, point.z);
-    console.log('[SceneManager] 点击格子:', grid, '世界坐标:', point);
-
-    if (grid.x < 0 || grid.x >= currentRoom.width || grid.z < 0 || grid.z >= currentRoom.height) return;
+    if (grid.x < 0 || grid.x >= currentRoom.width || grid.z < 0 || grid.z >= currentRoom.height) {
+      console.log('[SceneManager] 格子超出范围:', grid, '房间:', currentRoom.width + 'x' + currentRoom.height);
+      return;
+    }
 
     // 调用clickGrid逻辑
     const result = clickGrid(grid.x, grid.z);
