@@ -52,8 +52,8 @@ const CameraControls = (() => {
 
   function onMouseDown(e) {
     if (!enabled) return;
-    if (e.button === 0) { isDragging = true; }       // 左键旋转
-    else if (e.button === 2) { isPanning = true; }    // 右键平移
+    if (e.button === 2) { isDragging = true; }       // 右键旋转
+    else if (e.button === 1 || (e.button === 0 && e.shiftKey)) { isPanning = true; }  // 中键或Shift+左键平移
     lastMouse = { x: e.clientX, y: e.clientY };
     velocity = { theta: 0, phi: 0, zoom: 0 };
   }

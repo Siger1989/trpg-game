@@ -15,7 +15,7 @@ const SceneManager = (() => {
 
   // ========== 绿色轨迹线 + 点击移动 ==========
   let pathLine = null;           // THREE.Line 绿色路径
-  let pathTarget = null;         // {x, z} 目标格子（第一次点击设置，第二次点击执行）
+  let pathTarget = null;         // {x, z} 目标格子（点击移动时设置）
   let pathHighlight = null;      // 目标格子高亮mesh
   let playerModel = null;        // GLB模型（monster.glb）
   let playerMixer = null;        // AnimationMixer
@@ -923,19 +923,13 @@ const SceneManager = (() => {
     nextStep();
   }
 
-  // 点击格子：第一次显示路径，第二次执行移动
+  // 点击格子：直接寻路移动
   function clickGrid(gx, gz) {
     if (animating || !currentRoom) return 'busy';
     const pp = getPlayerPos();
-    // 点击自己位置：取消路径
+    // 点击自己位置：忽略
     if (gx === pp.x && gz === pp.z) { clearPathLine(); return 'cancel'; }
-    // 如果已有路径目标且点击同一格：执行移动
-    if (pathTarget && pathTarget.x === gx && pathTarget.z === gz) {
-      const path = findPath(pp.x, pp.z, gx, gz);
-      if (path) { moveAlongPath(path); return 'move'; }
-      return 'blocked';
-    }
-    // 第一次点击：显示路径
+    // 寻路并直接移动
     const path = findPath(pp.x, pp.z, gx, gz);
     if (!path) return 'blocked';
     
@@ -943,9 +937,9 @@ const SceneManager = (() => {
     const ap = typeof DMEngine !== 'undefined' ? DMEngine.getAP() : { current: 999, max: 999 };
     const cost = path.length - 1; // 移动步数
     if (ap.current >= cost) {
-      pathTarget = { x: gx, z: gz };
-      showPathLine(path);
-      return 'preview';
+      showPathLine(path); // 显示路径线
+      moveAlongPath(path); // 直接移动
+      return 'move';
     } else {
       showRedPathLine(path);
       return 'blocked';
@@ -1006,7 +1000,7 @@ const SceneManager = (() => {
       const intersects = raycaster.intersectObject(floorMesh);
       if (intersects.length > 0) {
         const point = intersects[0].point;
-        grid = worldToGrid(point.x, point.z);
+        grid = worldToGrid({ x: point.x, z: point.z });
         console.log('[SceneManager] raycast命中地板, 世界坐标:', point, '→ 格子:', grid);
       }
     }
@@ -1018,7 +1012,7 @@ const SceneManager = (() => {
       const intersects = raycaster.intersectObjects(allObjects);
       if (intersects.length > 0) {
         const point = intersects[0].point;
-        grid = worldToGrid(point.x, point.z);
+        grid = worldToGrid({ x: point.x, z: point.z });
         console.log('[SceneManager] raycast命中场景对象, 世界坐标:', point, '→ 格子:', grid, '对象:', intersects[0].object.name || intersects[0].object.type);
       }
     }
@@ -1036,11 +1030,7 @@ const SceneManager = (() => {
     // 调用clickGrid逻辑
     const result = clickGrid(grid.x, grid.z);
     console.log('[SceneManager] clickGrid结果:', result);
-    if (result === 'preview') {
-      // 第一次点击：显示路径
-    } else if (result === 'move') {
-      // 第二次点击：执行移动
-    }
+    // 单击直接移动，无需区分preview/move
   }
 
   // ========== GLB模型加载 ==========
