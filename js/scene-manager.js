@@ -17,6 +17,7 @@ const SceneManager = (() => {
   let pathLine = null;           // THREE.Line 绿色路径
   let pathTarget = null;         // {x, z} 目标格子（点击移动时设置）
   let pathHighlight = null;      // 目标格子高亮mesh
+  let pathMeshes = [];           // 所有路径相关mesh的统一引用，确保清除干净
   let playerModel = null;        // GLB模型（monster.glb）
   let playerMixer = null;        // AnimationMixer
   let playerActions = {};        // 动作名→AnimationAction
@@ -1128,27 +1129,26 @@ const SceneManager = (() => {
 
     const points = path.map(p => {
       const w = gridToWorld(p.x, p.z);
-      return new THREE.Vector3(w.x, 0.08, w.z); // 贴地稍高
+      return new THREE.Vector3(w.x, 0.08, w.z);
     });
 
-    // 使用管道几何体做粗发光轨迹线（比LineBasicMaterial更明显）
     const curve = new THREE.CatmullRomCurve3(points);
     const tubeGeo = new THREE.TubeGeometry(curve, points.length * 8, 0.06, 8, false);
     const tubeMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, transparent: true, opacity: 0.85 });
     pathLine = new THREE.Mesh(tubeGeo, tubeMat);
-    pathLine.name = 'pathLine';
     scene.add(pathLine);
+    pathMeshes.push(pathLine);
 
     // 每个路径节点加小发光球
     path.forEach((p, i) => {
-      if (i === 0 || i === path.length - 1) return; // 起终点用环
+      if (i === 0 || i === path.length - 1) return;
       const w = gridToWorld(p.x, p.z);
       const dotGeo = new THREE.SphereGeometry(0.08, 8, 6);
       const dotMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, transparent: true, opacity: 0.9 });
       const dot = new THREE.Mesh(dotGeo, dotMat);
       dot.position.set(w.x, 0.08, w.z);
-      dot.name = 'pathDot';
       scene.add(dot);
+      pathMeshes.push(dot);
     });
 
     // 目标格子高亮（绿色发光环）
@@ -1160,6 +1160,7 @@ const SceneManager = (() => {
     pathHighlight.rotation.x = -Math.PI / 2;
     pathHighlight.position.set(endW.x, 0.09, endW.z);
     scene.add(pathHighlight);
+    pathMeshes.push(pathHighlight);
 
     // 起点标记（小蓝环）
     const startP = path[0];
@@ -1169,8 +1170,8 @@ const SceneManager = (() => {
     const startRing = new THREE.Mesh(sGeo, sMat);
     startRing.rotation.x = -Math.PI / 2;
     startRing.position.set(startW.x, 0.09, startW.z);
-    startRing.name = 'pathStart';
     scene.add(startRing);
+    pathMeshes.push(startRing);
   }
 
   // 显示混合轨迹线（AP范围内绿色，超出部分红色）
@@ -1178,9 +1179,8 @@ const SceneManager = (() => {
     clearPathLine();
     if (!path || path.length < 2 || !scene) return;
 
-    // apRange: AP能走的步数（path[0]是起点，path[1]是第一步）
-    const greenEnd = Math.min(apRange + 1, path.length); // 绿色路径到第apRange+1个节点
-    const redStart = greenEnd; // 红色从greenEnd开始
+    const greenEnd = Math.min(apRange + 1, path.length);
+    const redStart = greenEnd;
 
     // 绿色部分
     if (greenEnd >= 2) {
@@ -1192,21 +1192,20 @@ const SceneManager = (() => {
       const greenTube = new THREE.TubeGeometry(greenCurve, greenPoints.length * 8, 0.06, 8, false);
       const greenMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, transparent: true, opacity: 0.85 });
       const greenMesh = new THREE.Mesh(greenTube, greenMat);
-      greenMesh.name = 'pathLine';
       scene.add(greenMesh);
+      pathMeshes.push(greenMesh);
+      pathLine = greenMesh;
 
-      // 绿色节点球
       for (let i = 1; i < greenEnd - 1; i++) {
         const w = gridToWorld(path[i].x, path[i].z);
         const dotGeo = new THREE.SphereGeometry(0.08, 8, 6);
         const dotMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, transparent: true, opacity: 0.9 });
         const dot = new THREE.Mesh(dotGeo, dotMat);
         dot.position.set(w.x, 0.08, w.z);
-        dot.name = 'pathDot';
         scene.add(dot);
+        pathMeshes.push(dot);
       }
 
-      // AP边界格子高亮（绿色发光环）—— 这是AP能到的最远点
       const apEndP = path[greenEnd - 1];
       const apEndW = gridToWorld(apEndP.x, apEndP.z);
       const hlGeo = new THREE.RingGeometry(0.25, 0.55, 16);
@@ -1215,11 +1214,11 @@ const SceneManager = (() => {
       pathHighlight.rotation.x = -Math.PI / 2;
       pathHighlight.position.set(apEndW.x, 0.09, apEndW.z);
       scene.add(pathHighlight);
+      pathMeshes.push(pathHighlight);
     }
 
-    // 红色部分（超出AP范围）
+    // 红色部分
     if (redStart < path.length) {
-      // 红色从绿色末端开始，确保连续
       const redPoints = path.slice(redStart - 1).map(p => {
         const w = gridToWorld(p.x, p.z);
         return new THREE.Vector3(w.x, 0.08, w.z);
@@ -1228,21 +1227,19 @@ const SceneManager = (() => {
       const redTube = new THREE.TubeGeometry(redCurve, redPoints.length * 8, 0.06, 8, false);
       const redMat = new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.85 });
       const redMesh = new THREE.Mesh(redTube, redMat);
-      redMesh.name = 'pathLineRed';
       scene.add(redMesh);
+      pathMeshes.push(redMesh);
 
-      // 红色节点球
       for (let i = 1; i < redPoints.length - 1; i++) {
         const w = gridToWorld(path[redStart + i].x, path[redStart + i].z);
         const dotGeo = new THREE.SphereGeometry(0.08, 8, 6);
         const dotMat = new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.9 });
         const dot = new THREE.Mesh(dotGeo, dotMat);
         dot.position.set(w.x, 0.08, w.z);
-        dot.name = 'pathDot';
         scene.add(dot);
+        pathMeshes.push(dot);
       }
 
-      // 目标格子高亮（红色发光环）
       const endP = path[path.length - 1];
       const endW = gridToWorld(endP.x, endP.z);
       const endGeo = new THREE.RingGeometry(0.25, 0.55, 16);
@@ -1250,11 +1247,11 @@ const SceneManager = (() => {
       const endRing = new THREE.Mesh(endGeo, endMat);
       endRing.rotation.x = -Math.PI / 2;
       endRing.position.set(endW.x, 0.06, endW.z);
-      endRing.name = 'pathEndRed';
       scene.add(endRing);
+      pathMeshes.push(endRing);
     }
 
-    // 起点标记（小蓝环）
+    // 起点标记
     const startP = path[0];
     const startW = gridToWorld(startP.x, startP.z);
     const sGeo = new THREE.RingGeometry(0.15, 0.35, 16);
@@ -1262,8 +1259,8 @@ const SceneManager = (() => {
     const startRing = new THREE.Mesh(sGeo, sMat);
     startRing.rotation.x = -Math.PI / 2;
     startRing.position.set(startW.x, 0.09, startW.z);
-    startRing.name = 'pathStart';
     scene.add(startRing);
+    pathMeshes.push(startRing);
   }
 
   // 显示红色轨迹线（AP不足，无绿色部分时用）
@@ -1273,25 +1270,16 @@ const SceneManager = (() => {
 
   // 清除轨迹线
   function clearPathLine() {
-    // 清除pathLine和pathHighlight变量引用
-    if (pathLine && scene) { scene.remove(pathLine); pathLine.geometry?.dispose(); pathLine.material?.dispose(); }
+    // 用pathMeshes数组统一清除所有路径mesh
+    pathMeshes.forEach(obj => {
+      if (obj && obj.parent) obj.parent.remove(obj);
+      if (obj) { obj.geometry?.dispose(); obj.material?.dispose(); }
+    });
+    pathMeshes = [];
     pathLine = null;
-    if (pathHighlight && scene) { scene.remove(pathHighlight); pathHighlight.geometry?.dispose(); pathHighlight.material?.dispose(); }
     pathHighlight = null;
-    // 遍历scene清理所有路径相关对象（防止残留）
-    if (scene) {
-      const toRemove = [];
-      scene.traverse(obj => {
-        if (obj.name === 'pathLine' || obj.name === 'pathDot' || obj.name === 'pathStart' ||
-            obj.name === 'pathLineRed' || obj.name === 'pathEndRed') {
-          toRemove.push(obj);
-        }
-      });
-      toRemove.forEach(obj => { scene.remove(obj); obj.geometry?.dispose(); obj.material?.dispose(); });
-    }
     pathTarget = null;
   }
-
   // 沿路径移动（逐格动画）
   function moveAlongPath(path, callback) {
     if (!path || path.length < 2) { if (callback) callback(); return; }
