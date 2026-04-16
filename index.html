@@ -34,38 +34,9 @@
       <!-- 右侧：属性和选择 -->
       <div class="char-config-panel">
         <div class="config-section">
-          <h3>外观</h3>
-          <div class="appearance-row">
-            <label>发型</label>
-            <div class="selector-group">
-              <button class="sel-btn" data-part="hair" data-dir="-1">◀</button>
-              <span id="hair-label">短发</span>
-              <button class="sel-btn" data-part="hair" data-dir="1">▶</button>
-            </div>
-          </div>
-          <div class="appearance-row">
-            <label>脸型</label>
-            <div class="selector-group">
-              <button class="sel-btn" data-part="face" data-dir="-1">◀</button>
-              <span id="face-label">圆脸</span>
-              <button class="sel-btn" data-part="face" data-dir="1">▶</button>
-            </div>
-          </div>
-          <div class="appearance-row">
-            <label>表情</label>
-            <div class="selector-group">
-              <button class="sel-btn" data-part="expr" data-dir="-1">◀</button>
-              <span id="expr-label">平静</span>
-              <button class="sel-btn" data-part="expr" data-dir="1">▶</button>
-            </div>
-          </div>
-          <div class="appearance-row">
-            <label>服装</label>
-            <div class="selector-group">
-              <button class="sel-btn" data-part="outfit" data-dir="-1">◀</button>
-              <span id="outfit-label">风衣</span>
-              <button class="sel-btn" data-part="outfit" data-dir="1">▶</button>
-            </div>
+          <h3>属性 <button class="btn-reroll" id="btn-reroll">🎲 重投</button></h3>
+          <div class="attr-grid" id="attr-grid">
+            <!-- JS动态填充 -->
           </div>
         </div>
 
@@ -260,7 +231,6 @@
   <!-- 相机控制器 -->
   <script src="js/camera-controls.js"></script>
   <!-- 游戏模块 -->
-  <script src="js/paperdoll.js"></script>
   <script src="js/coc-rules.js"></script>
   <!-- 架构模块（方案A/B/C） -->
   <script src="js/scene-compiler.js"></script>
