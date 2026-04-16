@@ -1051,6 +1051,14 @@ const SceneManager = (() => {
     // 查找模型的骨骼
     const bones = [];
     model.traverse(child => { if (child.isBone) bones.push(child); });
+    // 如果直接遍历没找到，从SkinnedMesh的skeleton获取
+    if (bones.length === 0) {
+      model.traverse(child => {
+        if (child.isSkinnedMesh && child.skeleton && child.skeleton.bones) {
+          child.skeleton.bones.forEach(b => { if (!bones.includes(b)) bones.push(b); });
+        }
+      });
+    }
     if (bones.length === 0) {
       console.log('[SceneManager] 无骨骼，无法生成走路动画');
       return null;
@@ -1144,6 +1152,13 @@ const SceneManager = (() => {
     // 跑步 = 走路的加速加大版
     const bones = [];
     model.traverse(child => { if (child.isBone) bones.push(child); });
+    if (bones.length === 0) {
+      model.traverse(child => {
+        if (child.isSkinnedMesh && child.skeleton && child.skeleton.bones) {
+          child.skeleton.bones.forEach(b => { if (!bones.includes(b)) bones.push(b); });
+        }
+      });
+    }
     if (bones.length === 0) return null;
     
     const duration = 0.5; // 跑步周期更短

@@ -378,8 +378,18 @@
         
         // ========== 程序化生成走路/跑步动画 ==========
         const bones = [];
+        // 方法1：直接遍历找Bone节点
         model.traverse(child => { if (child.isBone) bones.push(child); });
-        console.log('[Preview] 骨骼数量:', bones.length, '骨骼列表:', bones.map(b => b.name));
+        // 方法2：如果没找到，从SkinnedMesh的skeleton.bones获取
+        if (bones.length === 0) {
+          model.traverse(child => {
+            if (child.isSkinnedMesh && child.skeleton && child.skeleton.bones) {
+              child.skeleton.bones.forEach(b => { if (!bones.includes(b)) bones.push(b); });
+            }
+          });
+        }
+        console.log('[Preview] 骨骼数量:', bones.length);
+        if (bones.length > 0) console.log('[Preview] 骨骼列表:', bones.map(b => b.name));
         
         if (bones.length > 0) {
           if (!mixer) mixer = new THREE.AnimationMixer(model);
