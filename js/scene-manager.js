@@ -1273,12 +1273,20 @@ const SceneManager = (() => {
 
   // 清除轨迹线
   function clearPathLine() {
-    if (pathLine && scene) { scene.remove(pathLine); pathLine.geometry.dispose(); pathLine.material.dispose(); pathLine = null; }
-    if (pathHighlight && scene) { scene.remove(pathHighlight); pathHighlight.geometry.dispose(); pathHighlight.material.dispose(); pathHighlight = null; }
-    // 清除路径节点球、起点环、红色路径、红色终点环
+    // 清除pathLine和pathHighlight变量引用
+    if (pathLine && scene) { scene.remove(pathLine); pathLine.geometry?.dispose(); pathLine.material?.dispose(); }
+    pathLine = null;
+    if (pathHighlight && scene) { scene.remove(pathHighlight); pathHighlight.geometry?.dispose(); pathHighlight.material?.dispose(); }
+    pathHighlight = null;
+    // 遍历scene清理所有路径相关对象（防止残留）
     if (scene) {
       const toRemove = [];
-      scene.traverse(obj => { if (obj.name === 'pathDot' || obj.name === 'pathStart' || obj.name === 'pathLineRed' || obj.name === 'pathEndRed') toRemove.push(obj); });
+      scene.traverse(obj => {
+        if (obj.name === 'pathLine' || obj.name === 'pathDot' || obj.name === 'pathStart' ||
+            obj.name === 'pathLineRed' || obj.name === 'pathEndRed') {
+          toRemove.push(obj);
+        }
+      });
       toRemove.forEach(obj => { scene.remove(obj); obj.geometry?.dispose(); obj.material?.dispose(); });
     }
     pathTarget = null;
