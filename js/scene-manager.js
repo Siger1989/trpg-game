@@ -237,6 +237,7 @@ const SceneManager = (() => {
     ring.position.y = 0.05;
     group.add(ring);
 
+    group.scale.set(0.5, 0.5, 0.5);
     playerMesh = group;
     scene.add(playerMesh);
   }
@@ -2134,7 +2135,7 @@ const SceneManager = (() => {
       // 根据模型包围盒自动缩放，使其高度约为1.5格
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
-      const targetHeight = 1.5; // 目标高度（格子单位）
+      const targetHeight = 0.75; // 目标高度（格子单位），缩小到1/2
       const autoScale = size.y > 0 ? targetHeight / size.y : 0.5;
       model.scale.set(autoScale, autoScale, autoScale);
       console.log('[SceneManager] 模型原始尺寸:', size, '自动缩放:', autoScale);
