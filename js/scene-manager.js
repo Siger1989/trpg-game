@@ -892,6 +892,8 @@ const SceneManager = (() => {
       if (step >= path.length) {
         animating = false;
         clearPathLine();
+        // 移动结束，回到idle
+        playAction('idle') || playAction('Idle');
         if (callback) callback();
         return;
       }
@@ -903,7 +905,7 @@ const SceneManager = (() => {
       const duration = 150;
       const startTime = performance.now();
       // 播放走路动作
-      playAction('walk');
+      playAction('walk') || playAction('Walk') || playAction('walking');
       function anim(now) {
         const t = Math.min(1, (now - startTime) / duration);
         const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
@@ -1043,6 +1045,194 @@ const SceneManager = (() => {
 
   // ========== GLB模型加载 ==========
 
+  // ========== 程序化走路/跑步动画生成 ==========
+  
+  function generateWalkAnimation(model) {
+    // 查找模型的骨骼
+    const bones = [];
+    model.traverse(child => { if (child.isBone) bones.push(child); });
+    if (bones.length === 0) {
+      console.log('[SceneManager] 无骨骼，无法生成走路动画');
+      return null;
+    }
+    console.log('[SceneManager] 找到骨骼:', bones.map(b => b.name));
+    
+    const duration = 0.8; // 走路周期（秒）
+    const fps = 30;
+    const frames = Math.round(duration * fps);
+    const times = [];
+    for (let i = 0; i <= frames; i++) times.push(i / fps);
+    
+    const tracks = [];
+    
+    // 辅助函数：生成正弦关键帧
+    function sineKeyframes(amplitude, phase) {
+      return times.map(t => amplitude * Math.sin(2 * Math.PI * t / duration + phase));
+    }
+    function cosKeyframes(amplitude, phase) {
+      return times.map(t => amplitude * Math.cos(2 * Math.PI * t / duration + phase));
+    }
+    function constKeyframes(value) {
+      return times.map(() => value);
+    }
+    
+    // 找骨骼（模糊匹配）
+    function findBone(partials) {
+      for (const p of partials) {
+        const found = bones.find(b => b.name.toLowerCase().includes(p.toLowerCase()));
+        if (found) return found;
+      }
+      return null;
+    }
+    
+    // --- 腿部：交替前后摆动 ---
+    const legSwing = 0.4; // 腿部前后摆幅（弧度）
+    const leftLeg = findBone(['leftleg', 'leg_l', 'left_up_leg', 'upperleg_l', 'thigh_l', 'LeftUpLeg']);
+    const rightLeg = findBone(['rightleg', 'leg_r', 'right_up_leg', 'upperleg_r', 'thigh_r', 'RightUpLeg']);
+    
+    if (leftLeg) {
+      tracks.push(new THREE.NumberKeyframeTrack(
+        leftLeg.name + '.rotation[x]', times, sineKeyframes(legSwing, 0), THREE.InterpolateLinear
+      ));
+    }
+    if (rightLeg) {
+      tracks.push(new THREE.NumberKeyframeTrack(
+        rightLeg.name + '.rotation[x]', times, sineKeyframes(legSwing, Math.PI), THREE.InterpolateLinear
+      ));
+    }
+    
+    // --- 小腿：走路时微弯 ---
+    const kneeSwing = 0.25;
+    const leftKnee = findBone(['leftknee', 'knee_l', 'left_low_leg', 'lowerleg_l', 'shin_l', 'LeftLowLeg', 'calf_l']);
+    const rightKnee = findBone(['rightknee', 'knee_r', 'right_low_leg', 'lowerleg_r', 'shin_r', 'RightLowLeg', 'calf_r']);
+    
+    if (leftKnee) {
+      // 小腿只在腿向后时弯曲
+      const kneeValues = times.map(t => {
+        const phase = Math.sin(2 * Math.PI * t / duration);
+        return phase < 0 ? -kneeSwing * Math.abs(phase) : 0;
+      });
+      tracks.push(new THREE.NumberKeyframeTrack(
+        leftKnee.name + '.rotation[x]', times, kneeValues, THREE.InterpolateLinear
+      ));
+    }
+    if (rightKnee) {
+      const kneeValues = times.map(t => {
+        const phase = Math.sin(2 * Math.PI * t / duration + Math.PI);
+        return phase < 0 ? -kneeSwing * Math.abs(phase) : 0;
+      });
+      tracks.push(new THREE.NumberKeyframeTrack(
+        rightKnee.name + '.rotation[x]', times, kneeValues, THREE.InterpolateLinear
+      ));
+    }
+    
+    // --- 手臂：与腿反向摆动 ---
+    const armSwing = 0.35;
+    const leftArm = findBone(['leftarm', 'arm_l', 'left_up_arm', 'upperarm_l', 'LeftUpArm']);
+    const rightArm = findBone(['rightarm', 'arm_r', 'right_up_arm', 'upperarm_r', 'RightUpArm']);
+    
+    if (leftArm) {
+      tracks.push(new THREE.NumberKeyframeTrack(
+        leftArm.name + '.rotation[x]', times, sineKeyframes(armSwing, Math.PI), THREE.InterpolateLinear
+      ));
+    }
+    if (rightArm) {
+      tracks.push(new THREE.NumberKeyframeTrack(
+        rightArm.name + '.rotation[x]', times, sineKeyframes(armSwing, 0), THREE.InterpolateLinear
+      ));
+    }
+    
+    // --- 身体：上下微动 ---
+    const bodyBob = 0.03; // 上下幅度
+    const spine = findBone(['spine', 'chest', 'torso', 'body', 'hips', 'pelvis']);
+    if (spine) {
+      tracks.push(new THREE.NumberKeyframeTrack(
+        spine.name + '.position[y]', times, cosKeyframes(bodyBob, 0).map(v => v + (spine.position?.y || 0)), THREE.InterpolateLinear
+      ));
+    }
+    
+    // --- 头部：微摆 ---
+    const headSwing = 0.05;
+    const head = findBone(['head', 'neck', 'skull']);
+    if (head) {
+      tracks.push(new THREE.NumberKeyframeTrack(
+        head.name + '.rotation[y]', times, sineKeyframes(headSwing, 0), THREE.InterpolateLinear
+      ));
+    }
+    
+    if (tracks.length === 0) {
+      console.log('[SceneManager] 未匹配到任何骨骼，无法生成走路动画');
+      return null;
+    }
+    
+    console.log('[SceneManager] 生成走路动画: ' + tracks.length + '条轨道');
+    return new THREE.AnimationClip('walk', duration, tracks);
+  }
+  
+  function generateRunAnimation(model) {
+    // 跑步 = 走路的加速加大版
+    const bones = [];
+    model.traverse(child => { if (child.isBone) bones.push(child); });
+    if (bones.length === 0) return null;
+    
+    const duration = 0.5; // 跑步周期更短
+    const fps = 30;
+    const frames = Math.round(duration * fps);
+    const times = [];
+    for (let i = 0; i <= frames; i++) times.push(i / fps);
+    
+    const tracks = [];
+    
+    function sineKeyframes(amplitude, phase) {
+      return times.map(t => amplitude * Math.sin(2 * Math.PI * t / duration + phase));
+    }
+    function cosKeyframes(amplitude, phase) {
+      return times.map(t => amplitude * Math.cos(2 * Math.PI * t / duration + phase));
+    }
+    
+    function findBone(partials) {
+      for (const p of partials) {
+        const found = bones.find(b => b.name.toLowerCase().includes(p.toLowerCase()));
+        if (found) return found;
+      }
+      return null;
+    }
+    
+    const legSwing = 0.7;
+    const leftLeg = findBone(['leftleg', 'leg_l', 'left_up_leg', 'upperleg_l', 'thigh_l', 'LeftUpLeg']);
+    const rightLeg = findBone(['rightleg', 'leg_r', 'right_up_leg', 'upperleg_r', 'thigh_r', 'RightUpLeg']);
+    if (leftLeg) tracks.push(new THREE.NumberKeyframeTrack(leftLeg.name + '.rotation[x]', times, sineKeyframes(legSwing, 0), THREE.InterpolateLinear));
+    if (rightLeg) tracks.push(new THREE.NumberKeyframeTrack(rightLeg.name + '.rotation[x]', times, sineKeyframes(legSwing, Math.PI), THREE.InterpolateLinear));
+    
+    const kneeSwing = 0.5;
+    const leftKnee = findBone(['leftknee', 'knee_l', 'left_low_leg', 'lowerleg_l', 'shin_l', 'LeftLowLeg', 'calf_l']);
+    const rightKnee = findBone(['rightknee', 'knee_r', 'right_low_leg', 'lowerleg_r', 'shin_r', 'RightLowLeg', 'calf_r']);
+    if (leftKnee) {
+      const v = times.map(t => { const p = Math.sin(2 * Math.PI * t / duration); return p < 0 ? -kneeSwing * Math.abs(p) : 0; });
+      tracks.push(new THREE.NumberKeyframeTrack(leftKnee.name + '.rotation[x]', times, v, THREE.InterpolateLinear));
+    }
+    if (rightKnee) {
+      const v = times.map(t => { const p = Math.sin(2 * Math.PI * t / duration + Math.PI); return p < 0 ? -kneeSwing * Math.abs(p) : 0; });
+      tracks.push(new THREE.NumberKeyframeTrack(rightKnee.name + '.rotation[x]', times, v, THREE.InterpolateLinear));
+    }
+    
+    const armSwing = 0.6;
+    const leftArm = findBone(['leftarm', 'arm_l', 'left_up_arm', 'upperarm_l', 'LeftUpArm']);
+    const rightArm = findBone(['rightarm', 'arm_r', 'right_up_arm', 'upperarm_r', 'RightUpArm']);
+    if (leftArm) tracks.push(new THREE.NumberKeyframeTrack(leftArm.name + '.rotation[x]', times, sineKeyframes(armSwing, Math.PI), THREE.InterpolateLinear));
+    if (rightArm) tracks.push(new THREE.NumberKeyframeTrack(rightArm.name + '.rotation[x]', times, sineKeyframes(armSwing, 0), THREE.InterpolateLinear));
+    
+    const bodyBob = 0.06;
+    const spine = findBone(['spine', 'chest', 'torso', 'body', 'hips', 'pelvis']);
+    if (spine) {
+      tracks.push(new THREE.NumberKeyframeTrack(spine.name + '.position[y]', times, cosKeyframes(bodyBob, 0).map(v => v + (spine.position?.y || 0)), THREE.InterpolateLinear));
+    }
+    
+    if (tracks.length === 0) return null;
+    console.log('[SceneManager] 生成跑步动画: ' + tracks.length + '条轨道');
+    return new THREE.AnimationClip('run', duration, tracks);
+  }
+
   // 加载monster.glb替换主角
   function loadPlayerModel(url) {
     console.log('[SceneManager] loadPlayerModel called with:', url);
@@ -1070,13 +1260,38 @@ const SceneManager = (() => {
         playerMixer = new THREE.AnimationMixer(model);
         gltf.animations.forEach(clip => {
           const action = playerMixer.clipAction(clip);
-          playerActions[clip.name] = action; // 保留原始名称
-          playerActions[clip.name.toLowerCase()] = action; // 小写别名
+          playerActions[clip.name] = action;
+          playerActions[clip.name.toLowerCase()] = action;
         });
-        console.log('[SceneManager] 可用动作:', Object.keys(playerActions));
-        // 默认播放idle或第一个动画
-        const idleAction = playerActions['idle'] || playerActions['Idle'] || playerActions[Object.keys(playerActions)[0]];
-        if (idleAction) { idleAction.reset().fadeIn(0.3).play(); currentAction = Object.keys(playerActions).find(k => playerActions[k] === idleAction) || 'idle'; }
+        // Mixamo模型常见动作名映射：Take 001 → idle
+        if (playerActions['Take 001'] && !playerActions['idle']) {
+          playerActions['idle'] = playerActions['Take 001'];
+        }
+      }
+      
+      // ========== 程序化生成走路动画 ==========
+      // 基于模型骨骼生成走路动作（左右腿交替+身体上下微动+手臂摆动）
+      const walkClip = generateWalkAnimation(model);
+      if (walkClip) {
+        if (!playerMixer) playerMixer = new THREE.AnimationMixer(model);
+        const walkAction = playerMixer.clipAction(walkClip);
+        playerActions['walk'] = walkAction;
+        playerActions['Walk'] = walkAction;
+      }
+      
+      // 程序化生成跑步动画（走路加速版）
+      const runClip = generateRunAnimation(model);
+      if (runClip) {
+        if (!playerMixer) playerMixer = new THREE.AnimationMixer(model);
+        const runAction = playerMixer.clipAction(runClip);
+        playerActions['run'] = runAction;
+        playerActions['Run'] = runAction;
+      }
+      
+      console.log('[SceneManager] 可用动作:', Object.keys(playerActions));
+      // 默认播放idle
+      const idleAction = playerActions['idle'] || playerActions['Idle'] || playerActions[Object.keys(playerActions)[0]];
+      if (idleAction) { idleAction.reset().fadeIn(0.3).play(); currentAction = Object.keys(playerActions).find(k => playerActions[k] === idleAction) || 'idle'; }
       }
       // 替换旧模型
       if (playerMesh && scene) scene.remove(playerMesh);
@@ -1139,6 +1354,9 @@ const SceneManager = (() => {
     playerPos.x = newX;
     playerPos.z = newZ;
 
+    // 播放行走动作
+    playAction('walk') || playAction('Walk') || playAction('walking');
+
     // 平滑移动动画
     animating = true;
     const target = gridToWorld(newX, newZ);
@@ -1155,6 +1373,8 @@ const SceneManager = (() => {
         requestAnimationFrame(animateMove);
       } else {
         animating = false;
+        // 移动结束，回到idle
+        playAction('idle') || playAction('Idle');
       }
     }
     requestAnimationFrame(animateMove);
