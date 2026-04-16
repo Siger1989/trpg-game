@@ -320,6 +320,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 高亮反馈
         SceneManager.highlightObject(gx, gz);
+        
+        // 朝向物品
+        if (SceneManager.setPlayerFacing) {
+          SceneManager.setPlayerFacing(gx, gz);
+        }
 
         // 灯光类物件：开关灯
         const isLight = SceneManager.getObjectAt(gx, gz)?.isLight;

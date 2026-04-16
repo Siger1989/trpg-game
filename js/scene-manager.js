@@ -882,35 +882,49 @@ const SceneManager = (() => {
   function moveAlongPath(path, callback) {
     if (!path || path.length < 2) { if (callback) callback(); return; }
     animating = true;
-    let step = 1; // 从第1格开始（第0格是当前位置）
-    const cost = path.length - 1; // 移动步数
-    // 扣除AP
-    if (typeof DMEngine !== 'undefined' && DMEngine.consumeAP) {
-      DMEngine.consumeAP(cost);
-    }
+    let step = 1;
+    let lastDirection = 0; // 记录最后朝向
+    
     function nextStep() {
       if (step >= path.length) {
         animating = false;
         clearPathLine();
-        // 移动结束，回到idle
+        // 保持最后朝向，回到idle
         playAction('idle') || playAction('Idle');
+        // 更新UI
+        if (typeof UI !== 'undefined' && UI.updateHUD) UI.updateHUD();
+        if (typeof GameState !== 'undefined' && GameState.saveGame) GameState.saveGame();
         if (callback) callback();
         return;
       }
+      
+      const prev = path[step - 1];
       const target = path[step];
       playerPos.x = target.x;
       playerPos.z = target.z;
+      
+      const worldStart = gridToWorld(prev.x, prev.z);
       const worldTarget = gridToWorld(target.x, target.z);
-      const start = playerMesh.position.clone();
-      const duration = 150;
-      const startTime = performance.now();
+      
+      // 计算移动方向并旋转角色
+      const dx = worldTarget.x - worldStart.x;
+      const dz = worldTarget.z - worldStart.z;
+      lastDirection = Math.atan2(dx, dz); // 记录朝向
+      if (playerMesh) {
+        playerMesh.rotation.y = lastDirection;
+      }
+      
       // 播放走路动作
       playAction('walk') || playAction('Walk') || playAction('walking');
+      
+      const duration = 400; // 正常走路速度（每格400ms）
+      const startTime = performance.now();
+      
       function anim(now) {
         const t = Math.min(1, (now - startTime) / duration);
         const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-        playerMesh.position.x = start.x + (worldTarget.x - start.x) * ease;
-        playerMesh.position.z = start.z + (worldTarget.z - start.z) * ease;
+        playerMesh.position.x = worldStart.x + (worldTarget.x - worldStart.x) * ease;
+        playerMesh.position.z = worldStart.z + (worldTarget.z - worldStart.z) * ease;
         if (t < 1) {
           requestAnimationFrame(anim);
         } else {
@@ -922,24 +936,61 @@ const SceneManager = (() => {
     }
     nextStep();
   }
+  
+  // 设置玩家朝向（用于互动后朝向物品）
+  function setPlayerFacing(targetX, targetZ) {
+    if (!playerMesh) return;
+    const playerWorld = gridToWorld(playerPos.x, playerPos.z);
+    const targetWorld = gridToWorld(targetX, targetZ);
+    const dx = targetWorld.x - playerWorld.x;
+    const dz = targetWorld.z - playerWorld.z;
+    const angle = Math.atan2(dx, dz);
+    playerMesh.rotation.y = angle;
+  }
 
-  // 点击格子：直接寻路移动
+  // 点击格子：路径预览 → 确认移动
   function clickGrid(gx, gz) {
     if (animating || !currentRoom) return 'busy';
     const pp = getPlayerPos();
     // 点击自己位置：忽略
     if (gx === pp.x && gz === pp.z) { clearPathLine(); return 'cancel'; }
-    // 寻路并直接移动
+
+    // 检查是否在预览状态，点击的是目标格子
+    if (pathTarget && gx === pathTarget.x && gz === pathTarget.z) {
+      // 确认移动
+      const path = findPath(pp.x, pp.z, gx, gz);
+      if (!path) return 'blocked';
+      
+      // 检查AP是否足够（每格消耗1 AP）
+      const ap = typeof DMEngine !== 'undefined' ? DMEngine.getAP() : { current: 999, max: 999 };
+      const cost = path.length - 1;
+      if (ap.current >= cost) {
+        // 扣AP
+        if (typeof DMEngine !== 'undefined' && DMEngine.consumeAP) {
+          DMEngine.consumeAP(cost);
+        }
+        // 清除预览并移动
+        clearPathLine();
+        moveAlongPath(path);
+        pathTarget = null;
+        return 'move';
+      } else {
+        showRedPathLine(path);
+        return 'blocked';
+      }
+    }
+
+    // 第一次点击：显示路径预览
     const path = findPath(pp.x, pp.z, gx, gz);
     if (!path) return 'blocked';
-    
-    // 检查AP是否足够（每格消耗1 AP）
+
+    // 检查AP是否足够
     const ap = typeof DMEngine !== 'undefined' ? DMEngine.getAP() : { current: 999, max: 999 };
-    const cost = path.length - 1; // 移动步数
+    const cost = path.length - 1;
     if (ap.current >= cost) {
-      showPathLine(path); // 显示路径线
-      moveAlongPath(path); // 直接移动
-      return 'move';
+      showPathLine(path);
+      pathTarget = { x: gx, z: gz };
+      return 'preview';
     } else {
       showRedPathLine(path);
       return 'blocked';
@@ -1942,7 +1993,7 @@ const SceneManager = (() => {
 
   return {
     init, buildRoom, clearRoom,
-    movePlayer, movePlayerToGrid, getPlayerPos,
+    movePlayer, movePlayerToGrid, getPlayerPos, setPlayerFacing,
     getObjectAt, getRoomInfo,
     hasLineOfSight, gridDistance,
     gridToWorld, worldToGrid,
