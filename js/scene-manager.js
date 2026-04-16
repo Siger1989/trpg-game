@@ -1093,15 +1093,17 @@ const SceneManager = (() => {
       return null;
     }
     
-    // BipTrump骨骼映射
-    const bLeftLeg = findBone(['l thigh', 'leftleg', 'leg_l', 'left_up_leg', 'upperleg_l', 'thigh_l', 'LeftUpLeg']);
-    const bRightLeg = findBone(['r thigh', 'rightleg', 'leg_r', 'right_up_leg', 'upperleg_r', 'thigh_r', 'RightUpLeg']);
-    const bLeftKnee = findBone(['l calf', 'leftknee', 'knee_l', 'left_low_leg', 'lowerleg_l', 'shin_l', 'LeftLowLeg', 'calf_l']);
-    const bRightKnee = findBone(['r calf', 'rightknee', 'knee_r', 'right_low_leg', 'lowerleg_r', 'shin_r', 'RightLowLeg', 'calf_r']);
-    const bLeftArm = findBone(['l upperarm', 'leftarm', 'arm_l', 'left_up_arm', 'upperarm_l', 'LeftUpArm']);
-    const bRightArm = findBone(['r upperarm', 'rightarm', 'arm_r', 'right_up_arm', 'upperarm_r', 'RightUpArm']);
+    // BipTrump骨骼映射（注意：BipTrump用下划线分隔如L_Thigh，需同时匹配空格和下划线版本）
+    const bLeftLeg = findBone(['l thigh', 'l_thigh', 'leftleg', 'leg_l', 'left_up_leg', 'upperleg_l', 'thigh_l', 'LeftUpLeg']);
+    const bRightLeg = findBone(['r thigh', 'r_thigh', 'rightleg', 'leg_r', 'right_up_leg', 'upperleg_r', 'thigh_r', 'RightUpLeg']);
+    const bLeftKnee = findBone(['l calf', 'l_calf', 'leftknee', 'knee_l', 'left_low_leg', 'lowerleg_l', 'shin_l', 'LeftLowLeg', 'calf_l']);
+    const bRightKnee = findBone(['r calf', 'r_calf', 'rightknee', 'knee_r', 'right_low_leg', 'lowerleg_r', 'shin_r', 'RightLowLeg', 'calf_r']);
+    const bLeftArm = findBone(['l upperarm', 'l_upperarm', 'leftarm', 'arm_l', 'left_up_arm', 'upperarm_l', 'LeftUpArm']);
+    const bRightArm = findBone(['r upperarm', 'r_upperarm', 'rightarm', 'arm_r', 'right_up_arm', 'upperarm_r', 'RightUpArm']);
     const bSpine = findBone(['spine1', 'spine', 'chest', 'torso', 'body', 'hips', 'pelvis']);
     const bHead = findBone(['head', 'neck', 'skull']);
+    // 根骨骼 - 身体弹跳用
+    const bRoot = findBone(['biptrump_00','biptrump','root','pelvis','hips','hip']) || bones[0];
     
     console.log('[SceneManager] 骨骼匹配结果:', {
       leftLeg: bLeftLeg?.name, rightLeg: bRightLeg?.name,
@@ -1111,33 +1113,48 @@ const SceneManager = (() => {
     });
     
     // --- 腿部：交替前后摆动 ---
+    // 检测确认：大腿 +Z增量=向前抬腿，-Z=向后踢
+    // 关键帧值 = 初始旋转 + 摆动增量
+    // 对侧协调：左腿向前时右臂向前
     const legSwing = 0.4;
-    if (bLeftLeg) tracks.push(new THREE.NumberKeyframeTrack(bLeftLeg.name + '.rotation[x]', times, sineKeyframes(legSwing, 0), THREE.InterpolateLinear));
-    if (bRightLeg) tracks.push(new THREE.NumberKeyframeTrack(bRightLeg.name + '.rotation[x]', times, sineKeyframes(legSwing, Math.PI), THREE.InterpolateLinear));
+    if (bLeftLeg) tracks.push(new THREE.NumberKeyframeTrack(bLeftLeg.name + '.rotation[z]', times, sineKeyframes(legSwing, 0).map(v => v + bLeftLeg.rotation.z), THREE.InterpolateLinear));
+    if (bRightLeg) tracks.push(new THREE.NumberKeyframeTrack(bRightLeg.name + '.rotation[z]', times, sineKeyframes(legSwing, Math.PI).map(v => v + bRightLeg.rotation.z), THREE.InterpolateLinear));
     
     // --- 小腿：走路时微弯 ---
-    const kneeSwing = 0.25;
+    // 检测确认：小腿 -Z增量=膝盖弯曲（向后折叠）
+    // 当腿向前摆时弯曲（sin>0时左腿向前）
+    const kneeSwing = 0.3;
     if (bLeftKnee) {
-      const kneeValues = times.map(t => { const phase = Math.sin(2 * Math.PI * t / duration); return phase < 0 ? -kneeSwing * Math.abs(phase) : 0; });
-      tracks.push(new THREE.NumberKeyframeTrack(bLeftKnee.name + '.rotation[x]', times, kneeValues, THREE.InterpolateLinear));
+      const initZ = bLeftKnee.rotation.z;
+      const kneeValues = times.map(t => { const phase = Math.sin(2 * Math.PI * t / duration); return initZ + (phase > 0 ? -kneeSwing * phase : 0); });
+      tracks.push(new THREE.NumberKeyframeTrack(bLeftKnee.name + '.rotation[z]', times, kneeValues, THREE.InterpolateLinear));
     }
     if (bRightKnee) {
-      const kneeValues = times.map(t => { const phase = Math.sin(2 * Math.PI * t / duration + Math.PI); return phase < 0 ? -kneeSwing * Math.abs(phase) : 0; });
-      tracks.push(new THREE.NumberKeyframeTrack(bRightKnee.name + '.rotation[x]', times, kneeValues, THREE.InterpolateLinear));
+      const initZ = bRightKnee.rotation.z;
+      const kneeValues = times.map(t => { const phase = Math.sin(2 * Math.PI * t / duration + Math.PI); return initZ + (phase > 0 ? -kneeSwing * phase : 0); });
+      tracks.push(new THREE.NumberKeyframeTrack(bRightKnee.name + '.rotation[z]', times, kneeValues, THREE.InterpolateLinear));
     }
     
-    // --- 手臂：与腿反向摆动 ---
+    // --- 手臂：与腿对侧协调（左腿向前→右臂向前） ---
+    // 检测确认：上臂 -Z增量=向前摆，+Z=向后摆
+    // 左腿相位0(向前)→右臂相位0(向前)，右腿相位π→左臂相位π
     const armSwing = 0.35;
-    if (bLeftArm) tracks.push(new THREE.NumberKeyframeTrack(bLeftArm.name + '.rotation[x]', times, sineKeyframes(armSwing, Math.PI), THREE.InterpolateLinear));
-    if (bRightArm) tracks.push(new THREE.NumberKeyframeTrack(bRightArm.name + '.rotation[x]', times, sineKeyframes(armSwing, 0), THREE.InterpolateLinear));
+    if (bLeftArm) tracks.push(new THREE.NumberKeyframeTrack(bLeftArm.name + '.rotation[z]', times, sineKeyframes(-armSwing, Math.PI).map(v => v + bLeftArm.rotation.z), THREE.InterpolateLinear));
+    if (bRightArm) tracks.push(new THREE.NumberKeyframeTrack(bRightArm.name + '.rotation[z]', times, sineKeyframes(-armSwing, 0).map(v => v + bRightArm.rotation.z), THREE.InterpolateLinear));
     
-    // --- 身体：上下微动 ---
-    const bodyBob = 0.03;
-    if (bSpine) tracks.push(new THREE.NumberKeyframeTrack(bSpine.name + '.position[y]', times, cosKeyframes(bodyBob, 0).map(v => v + (bSpine.position?.y || 0)), THREE.InterpolateLinear));
+    // --- 身体弹跳：根骨骼position[y] ---
+    // 双脚触地时身体最高，单脚支撑时最低
+    // BipTrump根骨骼有90度Z旋转，局部+X=世界上，所以用position[x]
+    const bodyBob = 1;
+    if (bRoot) {
+      const rootInitX = bRoot.position?.x || 0;
+      const rootBobVals = times.map(t => rootInitX + bodyBob * Math.cos(2 * Math.PI * t / duration));
+      tracks.push(new THREE.NumberKeyframeTrack(bRoot.name + '.position[x]', times, rootBobVals, THREE.InterpolateLinear));
+    }
     
     // --- 头部：微摆 ---
     const headSwing = 0.05;
-    if (bHead) tracks.push(new THREE.NumberKeyframeTrack(bHead.name + '.rotation[y]', times, sineKeyframes(headSwing, 0), THREE.InterpolateLinear));
+    if (bHead) tracks.push(new THREE.NumberKeyframeTrack(bHead.name + '.rotation[y]', times, sineKeyframes(headSwing, 0).map(v => v + bHead.rotation.y), THREE.InterpolateLinear));
     
     if (tracks.length === 0) {
       console.log('[SceneManager] 未匹配到任何骨骼，无法生成走路动画');
@@ -1184,27 +1201,44 @@ const SceneManager = (() => {
       return null;
     }
     
-    const legSwing = 0.7;
-    if (bLeftLeg) tracks.push(new THREE.NumberKeyframeTrack(bLeftLeg.name + '.rotation[x]', times, sineKeyframes(legSwing, 0), THREE.InterpolateLinear));
-    if (bRightLeg) tracks.push(new THREE.NumberKeyframeTrack(bRightLeg.name + '.rotation[x]', times, sineKeyframes(legSwing, Math.PI), THREE.InterpolateLinear));
+    // BipTrump骨骼映射（下划线分隔版本）
+    const bLeftLeg = findBone(['l thigh', 'l_thigh', 'leftleg', 'leg_l', 'left_up_leg', 'upperleg_l', 'thigh_l', 'LeftUpLeg']);
+    const bRightLeg = findBone(['r thigh', 'r_thigh', 'rightleg', 'leg_r', 'right_up_leg', 'upperleg_r', 'thigh_r', 'RightUpLeg']);
+    const bLeftKnee = findBone(['l calf', 'l_calf', 'leftknee', 'knee_l', 'left_low_leg', 'lowerleg_l', 'shin_l', 'LeftLowLeg', 'calf_l']);
+    const bRightKnee = findBone(['r calf', 'r_calf', 'rightknee', 'knee_r', 'right_low_leg', 'lowerleg_r', 'shin_r', 'RightLowLeg', 'calf_r']);
+    const bLeftArm = findBone(['l upperarm', 'l_upperarm', 'leftarm', 'arm_l', 'left_up_arm', 'upperarm_l', 'LeftUpArm']);
+    const bRightArm = findBone(['r upperarm', 'r_upperarm', 'rightarm', 'arm_r', 'right_up_arm', 'upperarm_r', 'RightUpArm']);
+    const bSpine = findBone(['spine1', 'spine', 'chest', 'torso', 'body', 'hips', 'pelvis']);
+    const bHead = findBone(['head', 'neck', 'skull']);
+    const bRoot = findBone(['biptrump_00','biptrump','root','pelvis','hips','hip']) || bones[0];
     
-    const kneeSwing = 0.5;
+    console.log('[SceneManager] Run骨骼匹配:', {lLeg:bLeftLeg?.name, rLeg:bRightLeg?.name, lKnee:bLeftKnee?.name, rKnee:bRightKnee?.name, lArm:bLeftArm?.name, rArm:bRightArm?.name, spine:bSpine?.name, root:bRoot?.name});
+    
+    const legSwing = 0.7;
+    if (bLeftLeg) tracks.push(new THREE.NumberKeyframeTrack(bLeftLeg.name + '.rotation[z]', times, sineKeyframes(legSwing, 0).map(v => v + bLeftLeg.rotation.z), THREE.InterpolateLinear));
+    if (bRightLeg) tracks.push(new THREE.NumberKeyframeTrack(bRightLeg.name + '.rotation[z]', times, sineKeyframes(legSwing, Math.PI).map(v => v + bRightLeg.rotation.z), THREE.InterpolateLinear));
+    
+    const kneeSwing = 0.6;
     if (bLeftKnee) {
-      const v = times.map(t => { const p = Math.sin(2 * Math.PI * t / duration); return p < 0 ? -kneeSwing * Math.abs(p) : 0; });
-      tracks.push(new THREE.NumberKeyframeTrack(bLeftKnee.name + '.rotation[x]', times, v, THREE.InterpolateLinear));
+      const initZ = bLeftKnee.rotation.z;
+      const v = times.map(t => { const p = Math.sin(2 * Math.PI * t / duration); return initZ + (p > 0 ? -kneeSwing * p : 0); });
+      tracks.push(new THREE.NumberKeyframeTrack(bLeftKnee.name + '.rotation[z]', times, v, THREE.InterpolateLinear));
     }
     if (bRightKnee) {
-      const v = times.map(t => { const p = Math.sin(2 * Math.PI * t / duration + Math.PI); return p < 0 ? -kneeSwing * Math.abs(p) : 0; });
-      tracks.push(new THREE.NumberKeyframeTrack(bRightKnee.name + '.rotation[x]', times, v, THREE.InterpolateLinear));
+      const initZ = bRightKnee.rotation.z;
+      const v = times.map(t => { const p = Math.sin(2 * Math.PI * t / duration + Math.PI); return initZ + (p > 0 ? -kneeSwing * p : 0); });
+      tracks.push(new THREE.NumberKeyframeTrack(bRightKnee.name + '.rotation[z]', times, v, THREE.InterpolateLinear));
     }
     
     const armSwing = 0.6;
-    if (bLeftArm) tracks.push(new THREE.NumberKeyframeTrack(bLeftArm.name + '.rotation[x]', times, sineKeyframes(armSwing, Math.PI), THREE.InterpolateLinear));
-    if (bRightArm) tracks.push(new THREE.NumberKeyframeTrack(bRightArm.name + '.rotation[x]', times, sineKeyframes(armSwing, 0), THREE.InterpolateLinear));
+    if (bLeftArm) tracks.push(new THREE.NumberKeyframeTrack(bLeftArm.name + '.rotation[z]', times, sineKeyframes(-armSwing, Math.PI).map(v => v + bLeftArm.rotation.z), THREE.InterpolateLinear));
+    if (bRightArm) tracks.push(new THREE.NumberKeyframeTrack(bRightArm.name + '.rotation[z]', times, sineKeyframes(-armSwing, 0).map(v => v + bRightArm.rotation.z), THREE.InterpolateLinear));
     
-    const bodyBob = 0.06;
-    if (bSpine) {
-      tracks.push(new THREE.NumberKeyframeTrack(bSpine.name + '.position[y]', times, cosKeyframes(bodyBob, 0).map(v => v + (bSpine.position?.y || 0)), THREE.InterpolateLinear));
+    const bodyBob = 2;
+    if (bRoot) {
+      const rootInitX = bRoot.position?.x || 0;
+      const rootBobVals = times.map(t => rootInitX + bodyBob * Math.cos(2 * Math.PI * t / duration));
+      tracks.push(new THREE.NumberKeyframeTrack(bRoot.name + '.position[x]', times, rootBobVals, THREE.InterpolateLinear));
     }
     
     if (tracks.length === 0) return null;
@@ -1228,20 +1262,44 @@ const SceneManager = (() => {
       console.log('[SceneManager] 动画列表:', gltf.animations.map(a => a.name));
       const model = gltf.scene;
       
-      // 修复贴图：GLB有贴图但材质没引用时，给材质设默认颜色
-      try {
-        model.traverse(child => {
-          if (child.isMesh && child.material) {
-            const mats = Array.isArray(child.material) ? child.material : [child.material];
-            mats.forEach(mat => {
-              if (!mat.map && (!mat.color || (mat.color.r >= 0.9 && mat.color.g >= 0.9 && mat.color.b >= 0.9))) {
-                mat.color = new THREE.Color(0xc9a04e); // 金色
-                mat.needsUpdate = true;
+      // 修复贴图：尝试从GLB提取内嵌贴图，修正PBR参数，否则设默认颜色
+      (async () => {
+        try {
+          let embeddedTexture = null;
+          if (gltf.parser && gltf.parser.getDependency) {
+            try {
+              const textures = gltf.parser.json.textures;
+              if (textures && textures.length > 0) {
+                embeddedTexture = await gltf.parser.getDependency('texture', 0);
+                console.log('[SceneManager] 提取到GLB内嵌贴图:', embeddedTexture);
               }
-            });
+            } catch(texErr) { console.warn('[SceneManager] 提取贴图失败:', texErr); }
           }
-        });
-      } catch(e) { console.warn('[SceneManager] 贴图修复失败:', e); }
+          model.traverse(child => {
+            if (child.isMesh && child.material) {
+              const mats = Array.isArray(child.material) ? child.material : [child.material];
+              mats.forEach(mat => {
+                if (!mat.map && embeddedTexture) {
+                  mat.map = embeddedTexture;
+                  mat.needsUpdate = true;
+                  console.log('[SceneManager] 已为材质', mat.name, '赋值内嵌贴图');
+                }
+                // 修正KHR_materials_pbrSpecularGlossiness转换问题
+                if (mat.isMeshStandardMaterial && mat.metalness >= 0.9 && mat.roughness >= 0.9) {
+                  console.log('[SceneManager] 修正PBR参数:', mat.name);
+                  mat.metalness = 0;
+                  mat.roughness = 0.7;
+                  mat.needsUpdate = true;
+                }
+                if (!mat.map && (!mat.color || (mat.color.r >= 0.9 && mat.color.g >= 0.9 && mat.color.b >= 0.9))) {
+                  mat.color = new THREE.Color(0xc9a04e); // 金色
+                  mat.needsUpdate = true;
+                }
+              });
+            }
+          });
+        } catch(e) { console.warn('[SceneManager] 贴图修复失败:', e); }
+      })();
       
       // 根据模型包围盒自动缩放，使其高度约为1.5格
       const box = new THREE.Box3().setFromObject(model);
@@ -1287,7 +1345,7 @@ const SceneManager = (() => {
       // 默认播放idle
       const idleAction = playerActions['idle'] || playerActions['Idle'] || playerActions[Object.keys(playerActions)[0]];
       if (idleAction) { idleAction.reset().fadeIn(0.3).play(); currentAction = Object.keys(playerActions).find(k => playerActions[k] === idleAction) || 'idle'; }
-      }
+      
       // 替换旧模型
       if (playerMesh && scene) scene.remove(playerMesh);
       playerModel = model;

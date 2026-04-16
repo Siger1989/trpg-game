@@ -264,23 +264,61 @@
     }, { passive: false });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // 灯光
-    const ambient = new THREE.AmbientLight(0x8888aa, 1.0);
+    // ========== 影棚三点布光 ==========
+    // 环境光：柔和基础照明
+    const ambient = new THREE.AmbientLight(0x404050, 0.6);
     scene.add(ambient);
-    const hemi = new THREE.HemisphereLight(0x9999cc, 0x444422, 0.8);
+    // 半球光：天空/地面色温差异
+    const hemi = new THREE.HemisphereLight(0xccccff, 0x443322, 0.5);
     scene.add(hemi);
-    const dirLight = new THREE.DirectionalLight(0xffeedd, 1.5);
-    dirLight.position.set(5, 8, 5);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.set(1024, 1024);
-    scene.add(dirLight);
-    const pointLight = new THREE.PointLight(0xc9a04e, 0.5, 10);
-    pointLight.position.set(-2, 3, -2);
-    scene.add(pointLight);
+    
+    // 主灯（Key Light）：右前上方，暖白色，最强
+    const keyLight = new THREE.DirectionalLight(0xfff0e0, 2.0);
+    keyLight.position.set(4, 6, 3);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.set(2048, 2048);
+    keyLight.shadow.camera.near = 0.1;
+    keyLight.shadow.camera.far = 20;
+    keyLight.shadow.camera.left = -5;
+    keyLight.shadow.camera.right = 5;
+    keyLight.shadow.camera.top = 5;
+    keyLight.shadow.camera.bottom = -5;
+    keyLight.shadow.bias = -0.001;
+    scene.add(keyLight);
+    
+    // 补光灯（Fill Light）：左前侧，冷色调，较弱
+    const fillLight = new THREE.DirectionalLight(0xc0d0ff, 0.8);
+    fillLight.position.set(-3, 4, 2);
+    scene.add(fillLight);
+    
+    // 轮廓灯（Rim/Back Light）：正后方，强光勾勒轮廓
+    const rimLight = new THREE.DirectionalLight(0xffd700, 1.2);
+    rimLight.position.set(0, 5, -4);
+    scene.add(rimLight);
+    
+    // 底灯（Fill Bottom）：地面反射补光，消除底部阴影
+    const bottomFill = new THREE.PointLight(0x8899aa, 0.4, 8);
+    bottomFill.position.set(0, 0.3, 1);
+    scene.add(bottomFill);
 
     // 地面参考（格子线）
     const gridHelper = new THREE.GridHelper(10, 10, 0x333344, 0x222233);
     scene.add(gridHelper);
+
+    // 圆形展台
+    const platformGeo = new THREE.CylinderGeometry(1.2, 1.3, 0.08, 32);
+    const platformMat = new THREE.MeshStandardMaterial({ color: 0x1a1a28, metalness: 0.3, roughness: 0.6 });
+    const platform = new THREE.Mesh(platformGeo, platformMat);
+    platform.position.y = 0.04;
+    platform.receiveShadow = true;
+    scene.add(platform);
+    // 展台边缘发光环
+    const ringGeo = new THREE.TorusGeometry(1.25, 0.015, 8, 64);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xc9a04e, transparent: true, opacity: 0.6 });
+    const glowRing = new THREE.Mesh(ringGeo, ringMat);
+    glowRing.rotation.x = -Math.PI / 2;
+    glowRing.position.y = 0.09;
+    scene.add(glowRing);
 
     // 中心标记
     const centerGeo = new THREE.RingGeometry(0.3, 0.5, 16);
@@ -325,23 +363,72 @@
         if (gltf.animations.length > 0) {
           console.log('[Preview] 动画列表:', gltf.animations.map(a => `"${a.name}" (${a.duration.toFixed(2)}s)`));
         }
-
+        
         const model = gltf.scene;
         
-        // 修复贴图：没贴图的材质设默认颜色
-        try {
+        // ===== 诊断：收集骨骼和材质信息 =====
+        const diagBones = [];
+        model.traverse(child => { if (child.isBone) diagBones.push(child.name); });
+        if (diagBones.length === 0) {
           model.traverse(child => {
-            if (child.isMesh && child.material) {
-              const mats = Array.isArray(child.material) ? child.material : [child.material];
-              mats.forEach(mat => {
-                if (!mat.map && (!mat.color || (mat.color.r >= 0.9 && mat.color.g >= 0.9 && mat.color.b >= 0.9))) {
-                  mat.color = new THREE.Color(0xc9a04e);
-                  mat.needsUpdate = true;
-                }
-              });
+            if (child.isSkinnedMesh && child.skeleton && child.skeleton.bones) {
+              child.skeleton.bones.forEach(b => { if (!diagBones.includes(b.name)) diagBones.push(b.name); });
             }
           });
-        } catch(e) { console.warn('[Preview] 贴图修复失败:', e); }
+        }
+        console.log('[DIAG] 骨骼数量:', diagBones.length, '骨骼:', diagBones);
+        
+        model.traverse(child => {
+          if (child.isMesh) {
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach((mat, i) => {
+              console.log('[DIAG] Mesh:', child.name, '材质:', mat.name, 'color:', mat.color?.toString(), 'map:', mat.map ? 'YES' : 'null', 'metalness:', mat.metalness, 'roughness:', mat.roughness);
+            });
+          }
+        });
+        
+        // 修复贴图：尝试从GLB提取内嵌贴图，修正PBR参数，否则设默认颜色
+        (async () => {
+          try {
+            // 先尝试从gltf.parser获取贴图
+            let embeddedTexture = null;
+            if (gltf.parser && gltf.parser.getDependency) {
+              try {
+                const textures = gltf.parser.json.textures;
+                if (textures && textures.length > 0) {
+                  embeddedTexture = await gltf.parser.getDependency('texture', 0);
+                  console.log('[Preview] 提取到GLB内嵌贴图:', embeddedTexture);
+                }
+              } catch(texErr) { console.warn('[Preview] 提取贴图失败:', texErr); }
+            }
+            
+            model.traverse(child => {
+              if (child.isMesh && child.material) {
+                const mats = Array.isArray(child.material) ? child.material : [child.material];
+                mats.forEach(mat => {
+                  // 如果材质没有贴图，尝试赋值内嵌贴图
+                  if (!mat.map && embeddedTexture) {
+                    mat.map = embeddedTexture;
+                    mat.needsUpdate = true;
+                    console.log('[Preview] 已为材质', mat.name, '赋值内嵌贴图');
+                  }
+                  // 修正KHR_materials_pbrSpecularGlossiness转换问题：metalness=1/roughness=1导致模型过暗
+                  if (mat.isMeshStandardMaterial && mat.metalness >= 0.9 && mat.roughness >= 0.9) {
+                    console.log('[Preview] 修正PBR参数:', mat.name, 'metalness:', mat.metalness, '→ 0, roughness:', mat.roughness, '→ 0.7');
+                    mat.metalness = 0;
+                    mat.roughness = 0.7;
+                    mat.needsUpdate = true;
+                  }
+                  // 如果还是没有贴图且颜色是白色，设一个有辨识度的颜色
+                  if (!mat.map && (!mat.color || (mat.color.r >= 0.9 && mat.color.g >= 0.9 && mat.color.b >= 0.9))) {
+                    mat.color = new THREE.Color(0xc9a04e);
+                    mat.needsUpdate = true;
+                  }
+                });
+              }
+            });
+          } catch(e) { console.warn('[Preview] 贴图修复失败:', e); }
+        })();
         
         // 根据模型包围盒自动缩放到合适尺寸（目标高度1.5）
         const box = new THREE.Box3().setFromObject(model);
@@ -394,7 +481,12 @@
         if (bones.length > 0) {
           if (!mixer) mixer = new THREE.AnimationMixer(model);
           
-          // --- 走路动画 ---
+          // ========== 关键发现 ==========
+          // BipTrump骨骼有非零初始旋转（大腿rotation.z≈165°, rotation.x≈180°）
+          // Three.js AnimationClip的NumberKeyframeTrack设置的是绝对值，不是增量！
+          // 所以关键帧值必须 = 骨骼初始旋转 + 摆动量
+          // 否则动画会覆盖初始姿态，导致腿翻转
+          
           const walkDuration = 0.8;
           const walkFps = 30;
           const walkFrames = Math.round(walkDuration * walkFps);
@@ -410,30 +502,81 @@
           }
           
           // BipTrump/Mixamo/通用骨骼映射
-          const bLLeg = findBone(['l thigh','leftleg','leg_l','left_up_leg','upperleg_l','thigh_l','LeftUpLeg']);
-          const bRLeg = findBone(['r thigh','rightleg','leg_r','right_up_leg','upperleg_r','thigh_r','RightUpLeg']);
-          const bLKnee = findBone(['l calf','leftknee','knee_l','left_low_leg','lowerleg_l','shin_l','LeftLowLeg','calf_l']);
-          const bRKnee = findBone(['r calf','rightknee','knee_r','right_low_leg','lowerleg_r','shin_r','RightLowLeg','calf_r']);
-          const bLArm = findBone(['l upperarm','leftarm','arm_l','left_up_arm','upperarm_l','LeftUpArm']);
-          const bRArm = findBone(['r upperarm','rightarm','arm_r','right_up_arm','upperarm_r','RightUpArm']);
+          const bLLeg = findBone(['l thigh','l_thigh','leftleg','leg_l','left_up_leg','upperleg_l','thigh_l','LeftUpLeg']);
+          const bRLeg = findBone(['r thigh','r_thigh','rightleg','leg_r','right_up_leg','upperleg_r','thigh_r','RightUpLeg']);
+          const bLKnee = findBone(['l calf','l_calf','leftknee','knee_l','left_low_leg','lowerleg_l','shin_l','LeftLowLeg','calf_l']);
+          const bRKnee = findBone(['r calf','r_calf','rightknee','knee_r','right_low_leg','lowerleg_r','shin_r','RightLowLeg','calf_r']);
+          const bLArm = findBone(['l upperarm','l_upperarm','leftarm','arm_l','left_up_arm','upperarm_l','LeftUpArm']);
+          const bRArm = findBone(['r upperarm','r_upperarm','rightarm','arm_r','right_up_arm','upperarm_r','RightUpArm']);
           const bSpine = findBone(['spine1','spine','chest','torso','body','hips','pelvis']);
           const bHead = findBone(['head','neck','skull']);
+          // 根骨骼（骨盆/根节点）- 身体上下弹跳用
+          const bRoot = findBone(['biptrump_00','biptrump','root','pelvis','hips','hip']) || bones[0];
+          // 脚部骨骼 - 用于计算脚底最低点
+          const bLFoot = findBone(['l foot','l_foot','leftfoot','foot_l','left_ankle','ankle_l','LeftFoot']);
+          const bRFoot = findBone(['r foot','r_foot','rightfoot','foot_r','right_ankle','ankle_r','RightFoot']);
           
           console.log('[Preview] 骨骼匹配:', {lLeg:bLLeg?.name, rLeg:bRLeg?.name, lKnee:bLKnee?.name, rKnee:bRKnee?.name, lArm:bLArm?.name, rArm:bRArm?.name, spine:bSpine?.name, head:bHead?.name});
-          function sineKF(amp, phase, dur) { return walkTimes.map(t => amp * Math.sin(2 * Math.PI * t / dur + phase)); }
-          function cosKF(amp, phase, dur) { return walkTimes.map(t => amp * Math.cos(2 * Math.PI * t / dur + phase)); }
+          
+          // 获取骨骼初始euler旋转（用于在关键帧中保持初始姿态）
+          function getInitRot(bone) {
+            if (!bone) return {x:0,y:0,z:0};
+            // 确保euler已从quaternion更新
+            bone.updateMatrixWorld(true);
+            return {x: bone.rotation.x, y: bone.rotation.y, z: bone.rotation.z};
+          }
+          
+          // 辅助函数：生成正弦关键帧值（叠加到初始值上）
+          function sineTrack(bone, axis, amp, phase, dur, times) {
+            const init = getInitRot(bone)[axis];
+            return times.map(t => init + amp * Math.sin(2 * Math.PI * t / dur + phase));
+          }
+          // 余弦关键帧（用于位移）
+          function cosTrack(bone, axis, amp, phase, dur, times) {
+            const init = axis === 'y' ? (bone.position?.y || 0) : (bone.position?.x || 0);
+            return times.map(t => init + amp * Math.cos(2 * Math.PI * t / dur + phase));
+          }
           
           const walkTracks = [];
-          const legSwing = 0.4, armSwing = 0.35, kneeSwing = 0.25, bodyBob = 0.03, headSwing = 0.05;
+          const legSwing = 0.4, armSwing = 0.35, kneeSwing = 0.3, bodyBob = 1, headBob = 0.05;
           
-          if (bLLeg) walkTracks.push(new THREE.NumberKeyframeTrack(bLLeg.name+'.rotation[x]',walkTimes,sineKF(legSwing,0,walkDuration)));
-          if (bRLeg) walkTracks.push(new THREE.NumberKeyframeTrack(bRLeg.name+'.rotation[x]',walkTimes,sineKF(legSwing,Math.PI,walkDuration)));
-          if (bLKnee) { const v=walkTimes.map(t=>{const p=Math.sin(2*Math.PI*t/walkDuration);return p<0?-kneeSwing*Math.abs(p):0;}); walkTracks.push(new THREE.NumberKeyframeTrack(bLKnee.name+'.rotation[x]',walkTimes,v)); }
-          if (bRKnee) { const v=walkTimes.map(t=>{const p=Math.sin(2*Math.PI*t/walkDuration+Math.PI);return p<0?-kneeSwing*Math.abs(p):0;}); walkTracks.push(new THREE.NumberKeyframeTrack(bRKnee.name+'.rotation[x]',walkTimes,v)); }
-          if (bLArm) walkTracks.push(new THREE.NumberKeyframeTrack(bLArm.name+'.rotation[x]',walkTimes,sineKF(armSwing,Math.PI,walkDuration)));
-          if (bRArm) walkTracks.push(new THREE.NumberKeyframeTrack(bRArm.name+'.rotation[x]',walkTimes,sineKF(armSwing,0,walkDuration)));
-          if (bSpine) walkTracks.push(new THREE.NumberKeyframeTrack(bSpine.name+'.position[y]',walkTimes,cosKF(bodyBob,0,walkDuration).map(v=>v+(bSpine.position?.y||0))));
-          if (bHead) walkTracks.push(new THREE.NumberKeyframeTrack(bHead.name+'.rotation[y]',walkTimes,sineKF(headSwing,0,walkDuration)));
+          // 大腿：绕Z轴摆动，+Z增量=向前抬腿（检测确认）
+          // 对侧协调：左腿相位0，右腿相位π
+          if (bLLeg) walkTracks.push(new THREE.NumberKeyframeTrack(bLLeg.name+'.rotation[z]',walkTimes,sineTrack(bLLeg,'z',legSwing,0,walkDuration,walkTimes)));
+          if (bRLeg) walkTracks.push(new THREE.NumberKeyframeTrack(bRLeg.name+'.rotation[z]',walkTimes,sineTrack(bRLeg,'z',legSwing,Math.PI,walkDuration,walkTimes)));
+          
+          // 小腿：膝盖弯曲=-Z增量（检测确认），在腿向前摆时弯曲
+          if (bLKnee) {
+            const init = getInitRot(bLKnee).z;
+            const v = walkTimes.map(t => {
+              const phase = Math.sin(2*Math.PI*t/walkDuration);
+              return init + (phase > 0 ? -kneeSwing * phase : 0);
+            });
+            walkTracks.push(new THREE.NumberKeyframeTrack(bLKnee.name+'.rotation[z]',walkTimes,v));
+          }
+          if (bRKnee) {
+            const init = getInitRot(bRKnee).z;
+            const v = walkTimes.map(t => {
+              const phase = Math.sin(2*Math.PI*t/walkDuration + Math.PI);
+              return init + (phase > 0 ? -kneeSwing * phase : 0);
+            });
+            walkTracks.push(new THREE.NumberKeyframeTrack(bRKnee.name+'.rotation[z]',walkTimes,v));
+          }
+          
+          // 手臂：-Z增量=向前摆（检测确认），对侧协调
+          if (bLArm) walkTracks.push(new THREE.NumberKeyframeTrack(bLArm.name+'.rotation[z]',walkTimes,sineTrack(bLArm,'z',-armSwing,Math.PI,walkDuration,walkTimes)));
+          if (bRArm) walkTracks.push(new THREE.NumberKeyframeTrack(bRArm.name+'.rotation[z]',walkTimes,sineTrack(bRArm,'z',-armSwing,0,walkDuration,walkTimes)));
+          
+          // 身体上下弹跳：BipTrump根骨骼局部+X=世界上，用position[x]
+          // 弹跳量=bodyBob，双脚触地时最高（cos=1），单脚支撑时最低（cos=-1）
+          if (bRoot) {
+            const rootInitX = bRoot.position?.x || 0;
+            const rootBobVals = walkTimes.map(t => rootInitX + bodyBob * Math.cos(2 * Math.PI * t / walkDuration));
+            walkTracks.push(new THREE.NumberKeyframeTrack(bRoot.name+'.position[x]',walkTimes,rootBobVals));
+          }
+          
+          // 头部：轻微Y轴旋转
+          if (bHead) walkTracks.push(new THREE.NumberKeyframeTrack(bHead.name+'.rotation[y]',walkTimes,sineTrack(bHead,'y',headBob,0,walkDuration,walkTimes)));
           
           if (walkTracks.length > 0) {
             const walkClip = new THREE.AnimationClip('walk', walkDuration, walkTracks);
@@ -441,25 +584,41 @@
             console.log('[Preview] 生成走路动画:', walkTracks.length, '条轨道');
           }
           
-          // --- 跑步动画（加速版） ---
+          // --- 跑步动画 ---
           const runDuration = 0.5;
           const runFrames = Math.round(runDuration * walkFps);
           const runTimes = [];
           for (let i = 0; i <= runFrames; i++) runTimes.push(i / walkFps);
           
-          function sineKF2(amp, phase, dur) { return runTimes.map(t => amp * Math.sin(2 * Math.PI * t / dur + phase)); }
-          function cosKF2(amp, phase, dur) { return runTimes.map(t => amp * Math.cos(2 * Math.PI * t / dur + phase)); }
-          
           const runTracks = [];
-          const rLegSwing = 0.7, rArmSwing = 0.6, rKneeSwing = 0.5, rBodyBob = 0.06;
+          const rLegSwing = 0.7, rArmSwing = 0.6, rKneeSwing = 0.6, rBodyBob = 2;
           
-          if (bLLeg) runTracks.push(new THREE.NumberKeyframeTrack(bLLeg.name+'.rotation[x]',runTimes,sineKF2(rLegSwing,0,runDuration)));
-          if (bRLeg) runTracks.push(new THREE.NumberKeyframeTrack(bRLeg.name+'.rotation[x]',runTimes,sineKF2(rLegSwing,Math.PI,runDuration)));
-          if (bLKnee) { const v=runTimes.map(t=>{const p=Math.sin(2*Math.PI*t/runDuration);return p<0?-rKneeSwing*Math.abs(p):0;}); runTracks.push(new THREE.NumberKeyframeTrack(bLKnee.name+'.rotation[x]',runTimes,v)); }
-          if (bRKnee) { const v=runTimes.map(t=>{const p=Math.sin(2*Math.PI*t/runDuration+Math.PI);return p<0?-rKneeSwing*Math.abs(p):0;}); runTracks.push(new THREE.NumberKeyframeTrack(bRKnee.name+'.rotation[x]',runTimes,v)); }
-          if (bLArm) runTracks.push(new THREE.NumberKeyframeTrack(bLArm.name+'.rotation[x]',runTimes,sineKF2(rArmSwing,Math.PI,runDuration)));
-          if (bRArm) runTracks.push(new THREE.NumberKeyframeTrack(bRArm.name+'.rotation[x]',runTimes,sineKF2(rArmSwing,0,runDuration)));
-          if (bSpine) runTracks.push(new THREE.NumberKeyframeTrack(bSpine.name+'.position[y]',runTimes,cosKF2(rBodyBob,0,runDuration).map(v=>v+(bSpine.position?.y||0))));
+          if (bLLeg) runTracks.push(new THREE.NumberKeyframeTrack(bLLeg.name+'.rotation[z]',runTimes,sineTrack(bLLeg,'z',rLegSwing,0,runDuration,runTimes)));
+          if (bRLeg) runTracks.push(new THREE.NumberKeyframeTrack(bRLeg.name+'.rotation[z]',runTimes,sineTrack(bRLeg,'z',rLegSwing,Math.PI,runDuration,runTimes)));
+          if (bLKnee) {
+            const init = getInitRot(bLKnee).z;
+            const v = runTimes.map(t => {
+              const phase = Math.sin(2*Math.PI*t/runDuration);
+              return init + (phase > 0 ? -rKneeSwing * phase : 0);
+            });
+            runTracks.push(new THREE.NumberKeyframeTrack(bLKnee.name+'.rotation[z]',runTimes,v));
+          }
+          if (bRKnee) {
+            const init = getInitRot(bRKnee).z;
+            const v = runTimes.map(t => {
+              const phase = Math.sin(2*Math.PI*t/runDuration + Math.PI);
+              return init + (phase > 0 ? -rKneeSwing * phase : 0);
+            });
+            runTracks.push(new THREE.NumberKeyframeTrack(bRKnee.name+'.rotation[z]',runTimes,v));
+          }
+          if (bLArm) runTracks.push(new THREE.NumberKeyframeTrack(bLArm.name+'.rotation[z]',runTimes,sineTrack(bLArm,'z',-rArmSwing,Math.PI,runDuration,runTimes)));
+          if (bRArm) runTracks.push(new THREE.NumberKeyframeTrack(bRArm.name+'.rotation[z]',runTimes,sineTrack(bRArm,'z',-rArmSwing,0,runDuration,runTimes)));
+          // 身体弹跳：根骨骼position[y]，跑步弹跳更大
+          if (bRoot) {
+            const rootInitX = bRoot.position?.x || 0;
+            const rootBobVals = runTimes.map(t => rootInitX + rBodyBob * Math.cos(2 * Math.PI * t / runDuration));
+            runTracks.push(new THREE.NumberKeyframeTrack(bRoot.name+'.position[x]',runTimes,rootBobVals));
+          }
           
           if (runTracks.length > 0) {
             const runClip = new THREE.AnimationClip('run', runDuration, runTracks);
@@ -484,16 +643,16 @@
 
         // 计算模型包围盒，调整相机
         const modelBox = new THREE.Box3().setFromObject(model);
-        const size = modelBox.getSize(new THREE.Vector3());
+        const modelSize = modelBox.getSize(new THREE.Vector3());
         const center = modelBox.getCenter(new THREE.Vector3());
         
         // 自动调整相机距离
-        const maxDim = Math.max(size.x, size.y, size.z);
+        const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
         orbit.spherical.radius = maxDim * 3;
         orbit.target.copy(center);
         updateCameraFromSpherical();
 
-        statusEl.innerHTML = `<span class="ok">✅ 加载成功</span> | 尺寸: ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)} | 动画: ${gltf.animations.length}个`;
+        statusEl.innerHTML = `<span class="ok">✅ 加载成功</span> | 尺寸: ${modelSize.x.toFixed(2)}×${modelSize.y.toFixed(2)}×${modelSize.z.toFixed(2)} | 动画: ${gltf.animations.length}个`;
 
       }, 
       (progress) => {
