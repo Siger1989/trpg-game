@@ -120,32 +120,32 @@ const DMEngine = (() => {
       scenes: [
         { id: 'arrival', name: '抵达旧宅', room: 'room_large', width: 6, height: 6,
           atmosphere: { fogDensity: 0.025, ambientIntensity: 0.2, lightColor: 0xffeedd, lightIntensity: 0.5 },
-          objects: [{ type: 'door', x: 0, z: 2 },{ type: 'lamp', x: 1, z: 1 },{ type: 'table', x: 3, z: 2 },{ type: 'chair', x: 4, z: 2 },{ type: 'bookshelf', x: 5, z: 0 }],
+          objects: [{ type: 'door', x: 0, z: 2, connectedRoomId: 'corridor', wall: 'north', portal: true, state: 'closed' },{ type: 'lamp', x: 1, z: 1 },{ type: 'table', x: 3, z: 2 },{ type: 'chair', x: 4, z: 2 },{ type: 'bookshelf', x: 5, z: 0 }],
           narration: '你站在旧宅的门厅中。空气中弥漫着陈腐的气味，灰尘在微弱的光线中缓缓飘落。一张布满灰尘的桌子摆在中央，上面似乎有什么东西...',
           choices: [{ text: '调查桌子', action: 'investigate_table' },{ text: '查看书架', action: 'check_bookshelf' },{ text: '走向走廊深处', action: 'go_corridor' }]
         },
         { id: 'corridor', name: '阴暗走廊', room: 'corridor', width: 2, height: 8,
           atmosphere: { fogDensity: 0.030, ambientIntensity: 0.15, lightColor: 0xffddbb, lightIntensity: 0.3 },
-          objects: [{ type: 'lamp', x: 0, z: 1 },{ type: 'lamp', x: 1, z: 5 },{ type: 'crate', x: 0, z: 3 }],
+          objects: [{ type: 'door', x: 0, z: 0, connectedRoomId: 'arrival', wall: 'south', portal: true, state: 'closed' },{ type: 'door', x: 1, z: 7, connectedRoomId: 'library', wall: 'north', portal: true, state: 'closed' },{ type: 'lamp', x: 0, z: 1 },{ type: 'lamp', x: 1, z: 5 },{ type: 'crate', x: 0, z: 3 }],
           narration: '走廊幽暗狭长，墙壁上的壁纸已经剥落，露出斑驳的灰泥。远处隐约传来某种声响...',
           choices: [{ text: '继续前进', action: 'go_deeper' },{ text: '检查箱子', action: 'check_crate' },{ text: '返回门厅', action: 'go_back_lobby' }]
         },
         { id: 'library', name: '尘封图书馆', room: 'library', width: 5, height: 5,
           atmosphere: { fogDensity: 0.020, ambientIntensity: 0.25, lightColor: 0xffeecc, lightIntensity: 0.5 },
-          objects: [{ type: 'bookshelf', x: 0, z: 0 },{ type: 'bookshelf', x: 0, z: 2 },{ type: 'bookshelf', x: 0, z: 4 },{ type: 'table', x: 2, z: 2 },{ type: 'lamp', x: 2, z: 0 },{ type: 'chair', x: 3, z: 2 }],
+          objects: [{ type: 'door', x: 0, z: 4, connectedRoomId: 'corridor', wall: 'south', portal: true, state: 'closed' },{ type: 'bookshelf', x: 0, z: 0 },{ type: 'bookshelf', x: 0, z: 2 },{ type: 'bookshelf', x: 0, z: 4 },{ type: 'table', x: 2, z: 2 },{ type: 'lamp', x: 2, z: 0 },{ type: 'chair', x: 3, z: 2 }],
           narration: '推开沉重的木门，你进入了一间布满书架的房间。古老的书籍散发着霉味，桌上摊开着一本日记...',
           choices: [{ text: '阅读日记', action: 'read_diary' },{ text: '搜索书架', action: 'search_books' },{ text: '查看角落', action: 'check_corner' }]
         },
         { id: 'basement', name: '地下室', room: 'basement', width: 4, height: 4,
           atmosphere: { fogDensity: 0.035, ambientIntensity: 0.1, lightColor: 0xffccaa, lightIntensity: 0.2 },
-          objects: [{ type: 'barrel', x: 0, z: 0 },{ type: 'crate', x: 2, z: 1 },{ type: 'lamp', x: 1, z: 0 },{ type: 'altar', x: 2, z: 2 }],
+          objects: [{ type: 'door', x: 2, z: 3, connectedRoomId: 'library', wall: 'south', portal: true, state: 'closed' },{ type: 'barrel', x: 0, z: 0 },{ type: 'crate', x: 2, z: 1 },{ type: 'lamp', x: 1, z: 0 },{ type: 'altar', x: 2, z: 2 }],
           narration: '潮湿的地下室里，水滴声回荡在黑暗中。借着微弱的灯光，你看到了一座石制祭坛...',
           enemies: [{ name: '深潜者教徒', dex: 55, hp: 12, maxHp: 12, x: 0, z: 3, weapon: '小刀', damage: '1D4+1' }],
           choices: [{ text: '调查祭坛', action: 'investigate_altar' },{ text: '准备战斗', action: 'prepare_fight' },{ text: '撤退', action: 'retreat' }]
         },
         { id: 'ritual_room', name: '仪式室', room: 'ritual', width: 5, height: 5,
           atmosphere: { fogDensity: 0.030, ambientIntensity: 0.15, lightColor: 0xff8866, lightIntensity: 0.3 },
-          objects: [{ type: 'altar', x: 2, z: 2 },{ type: 'statue', x: 0, z: 0 },{ type: 'statue', x: 4, z: 0 },{ type: 'lamp', x: 1, z: 1 },{ type: 'lamp', x: 3, z: 1 }],
+          objects: [{ type: 'door', x: 2, z: 4, connectedRoomId: 'basement', wall: 'south', portal: true, state: 'closed' },{ type: 'altar', x: 2, z: 2 },{ type: 'statue', x: 0, z: 0 },{ type: 'statue', x: 4, z: 0 },{ type: 'lamp', x: 1, z: 1 },{ type: 'lamp', x: 3, z: 1 }],
           narration: '你来到了最终的房间。空气中弥漫着令人不安的气息，祭坛上刻满了不可名状的符文...',
           enemies: [{ name: '邪教首领', dex: 60, hp: 18, maxHp: 18, x: 2, z: 0, weapon: '手枪(.38)', damage: '1D8' },{ name: '深潜者教徒', dex: 50, hp: 10, maxHp: 10, x: 0, z: 3, weapon: '小刀', damage: '1D4+1' }],
           choices: [{ text: '阻止仪式', action: 'stop_ritual' },{ text: '战斗', action: 'final_fight' },{ text: '尝试交涉', action: 'negotiate' }]
@@ -1046,6 +1046,286 @@ const DMEngine = (() => {
     }
   }
 
+  // ========== Phase 2: ActionOutcome应用 ==========
+  /**
+   * applyOutcome - 统一应用ActionOutcome中的状态变更
+   * 这是Phase 2的核心：所有状态修改必须通过此函数
+   * @param {Object} outcome - ActionOutcome对象（来自ActionResolver）
+   * @returns {Object} 应用结果 { applied: boolean, renderNeeded: boolean }
+   */
+  function applyOutcome(outcome) {
+    if (!outcome || !outcome.stateChanges || outcome.stateChanges.length === 0) {
+      return { applied: false, renderNeeded: outcome?.requiresRender || false };
+    }
+
+    let applied = true;
+    let renderNeeded = outcome.requiresRender || false;
+
+    for (const change of outcome.stateChanges) {
+      try {
+        switch (change.type) {
+          case 'object': {
+            // 更新gameState中的对象状态
+            if (gameState.objects) {
+              const obj = gameState.objects.find(o => o.gridX === change.gx && o.gridZ === change.gz);
+              if (obj) {
+                if (change.delta !== undefined) {
+                  obj[change.field] = (obj[change.field] || 0) + change.delta;
+                } else {
+                  obj[change.field] = change.value;
+                }
+              }
+            }
+            // 同步到SceneManager的真实对象
+            if (typeof SceneManager !== 'undefined' && SceneManager.sceneObjects) {
+              const sceneObj = SceneManager.sceneObjects.find(o => o.gridX === change.gx && o.gridZ === change.gz);
+              if (sceneObj) {
+                if (change.delta !== undefined) {
+                  sceneObj[change.field] = (sceneObj[change.field] || 0) + change.delta;
+                } else {
+                  sceneObj[change.field] = change.value;
+                }
+              }
+            }
+            break;
+          }
+          case 'object_state_advance': {
+            // 推进对象状态机
+            advanceObjectState(change.gx, change.gz);
+            break;
+          }
+          case 'room': {
+            // 更新房间状态
+            if (gameState.rooms && change.roomId) {
+              const room = gameState.rooms[change.roomId];
+              if (room) {
+                if (change.delta !== undefined) {
+                  room[change.field] = (room[change.field] || 0) + change.delta;
+                } else {
+                  room[change.field] = change.value;
+                }
+              }
+            }
+            break;
+          }
+          case 'player': {
+            // 更新玩家状态
+            const player = GameState.getPlayer();
+            if (player) {
+              if (change.field === 'san' && player.derived) {
+                player.derived.san = Math.max(0, (player.derived.san || 0) + (change.value || change.delta || 0));
+                if (typeof FogOfWar !== 'undefined' && FogOfWar.setSanityDistortion) {
+                  FogOfWar.setSanityDistortion(player.derived.san);
+                }
+              } else if (change.field === 'hp' && player.derived) {
+                player.derived.hp = Math.max(0, (player.derived.hp || 0) + (change.value || change.delta || 0));
+              } else if (player.derived && change.field in player.derived) {
+                if (change.delta !== undefined) {
+                  player.derived[change.field] = (player.derived[change.field] || 0) + change.delta;
+                } else {
+                  player.derived[change.field] = change.value;
+                }
+              }
+            }
+            break;
+          }
+          case 'inventory': {
+            // 背包操作
+            if (change.action === 'add') {
+              if (!worldState.inventory.includes(change.item)) {
+                worldState.inventory.push(change.item);
+                addFact('item', `获得: ${change.item}`);
+              }
+            } else if (change.action === 'remove') {
+              const idx = worldState.inventory.indexOf(change.item);
+              if (idx >= 0) worldState.inventory.splice(idx, 1);
+            }
+            break;
+          }
+          case 'clue': {
+            // 线索发现
+            if (gameState.clues) {
+              const clue = gameState.clues.find(c => c.id === change.clueId);
+              if (clue && !clue.discovered) {
+                clue.discovered = true;
+                addFact('clue', `发现线索: ${clue.name}`);
+              }
+            }
+            break;
+          }
+        }
+      } catch (err) {
+        console.warn('[applyOutcome] 状态变更失败:', change, err);
+        applied = false;
+      }
+    }
+
+    // 记录叙事日志
+    if (outcome.logs && outcome.logs.length > 0) {
+      narrativeHistory.push({
+        turn: worldState.turnCount++,
+        action: outcome.narrationHint || 'action',
+        narration: outcome.logs.join('\n'),
+        time: Date.now()
+      });
+    }
+
+    return { applied, renderNeeded };
+  }
+
+  // ========== Phase 3: 门交互处理 ==========
+  /**
+   * handleDoorInteraction - 处理门的交互（开/关/进入）
+   * @param {number} gx - 门格子X
+   * @param {number} gz - 门格子Z
+   * @param {string} action - 'open'|'close'|'enter'
+   * @returns {Object} ActionOutcome
+   */
+  function handleDoorInteraction(gx, gz, action) {
+    // 找到gameState中的门对象
+    const doorObj = gameState.objects?.find(o => o.gridX === gx && o.gridZ === gz && o.type === 'door');
+    const sceneDoor = (typeof SceneManager !== 'undefined' && SceneManager.sceneObjects)
+      ? SceneManager.sceneObjects.find(o => o.gridX === gx && o.gridZ === gz && o.type === 'door')
+      : null;
+
+    if (!doorObj && !sceneDoor) {
+      return { success: false, narration: '这里没有门。' };
+    }
+
+    const connectedRoomId = doorObj?.connectedRoomId || sceneDoor?.connectedRoomId;
+    const isPortal = doorObj?.portal || sceneDoor?.portal;
+    const isOpen = doorObj?.isOpen || sceneDoor?.isOn; // door的isOn=isOpen
+
+    if (action === 'open') {
+      if (isOpen) {
+        return { success: false, narration: '门已经是开着的。' };
+      }
+      // 开门
+      if (doorObj) { doorObj.isOpen = true; doorObj.isOn = true; doorObj.state = 'open'; }
+      if (sceneDoor) { sceneDoor.isOn = true; }
+      if (typeof SceneManager !== 'undefined' && SceneManager.toggleDoor) {
+        SceneManager.toggleDoor(gx, gz);
+      }
+
+      let narration = '你推开了门，门轴发出刺耳的声响。';
+      if (isPortal && connectedRoomId) {
+        narration += ` 门后通向另一个房间。`;
+      }
+      return { success: true, narration, connectedRoomId, isPortal, requiresRender: true };
+    }
+
+    if (action === 'close') {
+      if (!isOpen) {
+        return { success: false, narration: '门本来就是关着的。' };
+      }
+      if (doorObj) { doorObj.isOpen = false; doorObj.isOn = false; doorObj.state = 'closed'; }
+      if (sceneDoor) { sceneDoor.isOn = false; }
+      if (typeof SceneManager !== 'undefined' && SceneManager.toggleDoor) {
+        SceneManager.toggleDoor(gx, gz);
+      }
+      return { success: true, narration: '你关上了门。', requiresRender: true };
+    }
+
+    if (action === 'enter') {
+      if (!isOpen) {
+        return { success: false, narration: '门是关着的，你需要先打开它。' };
+      }
+      if (!isPortal || !connectedRoomId) {
+        return { success: false, narration: '这扇门似乎通向死路。' };
+      }
+      // 切换到连接的房间
+      const scenario = getActiveScenario();
+      if (scenario) {
+        const sceneIndex = scenario.scenes.findIndex(s => s.id === connectedRoomId);
+        if (sceneIndex >= 0) {
+          worldState.currentSceneIndex = sceneIndex;
+          addFact('location', scenario.scenes[sceneIndex].name);
+          return {
+            success: true,
+            narration: `你穿过了门...`,
+            nextScene: scenario.scenes[sceneIndex],
+            connectedRoomId,
+            requiresRender: true
+          };
+        }
+      }
+      return { success: false, narration: '门后似乎没有出路。' };
+    }
+
+    return { success: false, narration: '你不知道该怎么对待这扇门。' };
+  }
+
+  // ========== Phase 5: 回合收口 ==========
+  /**
+   * endTurn - 唯一的回合结束入口
+   * 手动结束和AP耗尽都走这个
+   * @param {string} reason - 'manual'|'ap_exhausted'|'event'
+   * @returns {Object} { turnCount, apRestored, events }
+   */
+  function endTurn(reason) {
+    const prevTurn = worldState.turnCount;
+    const apBefore = actionPoints.current;
+
+    // 1. 重置AP
+    resetAP();
+
+    // 2. 推进回合计数
+    worldState.turnCount++;
+
+    // 3. 事件触发（回合结束时的定时事件）
+    const events = [];
+    // TODO: 检查回合触发事件
+
+    // 4. 记录日志
+    addFact('turn', `回合${worldState.turnCount}结束 (${reason || 'manual'})`);
+
+    // 5. 返回结果
+    return {
+      turnCount: worldState.turnCount,
+      apRestored: actionPoints.current,
+      apBefore,
+      events,
+      reason: reason || 'manual'
+    };
+  }
+
+  /**
+   * validateInteraction - 交互三校验
+   * @param {number} gx - 目标格子X
+   * @param {number} gz - 目标格子Z
+   * @returns {Object} { valid: boolean, reason: string|null, feedback: string|null }
+   */
+  function validateInteraction(gx, gz) {
+    const scene = getCurrentScene();
+    if (!scene) {
+      return { valid: false, reason: 'no_scene', feedback: '当前不在任何场景中。' };
+    }
+
+    // 校验1: 对象是否在当前房间
+    const obj = gameState.objects?.find(o => o.gridX === gx && o.gridZ === gz);
+    if (!obj) {
+      return { valid: false, reason: 'no_object', feedback: '这里没有可以交互的东西。' };
+    }
+    if (obj.roomId && obj.roomId !== scene.id) {
+      return { valid: false, reason: 'wrong_room', feedback: '那个东西不在当前房间。' };
+    }
+
+    // 校验2: 对象是否可见
+    if (!obj.visible && !obj.discovered) {
+      return { valid: false, reason: 'not_visible', feedback: '你暂时还没有注意到这个目标。' };
+    }
+
+    // 校验3: 距离检查
+    if (typeof SceneManager !== 'undefined' && SceneManager.canInteract) {
+      if (!SceneManager.canInteract(gx, gz)) {
+        const dist = SceneManager.getInteractDistance ? SceneManager.getInteractDistance(gx, gz).toFixed(1) : '?';
+        return { valid: false, reason: 'out_of_range', feedback: `你离目标太远了（距离${dist}格），需要走近才能交互。` };
+      }
+    }
+
+    return { valid: true, reason: null, feedback: null };
+  }
+
   // ========== 查询与持久化 ==========
   function getWorldState() { return worldState; }
   function getHistory() { return narrativeHistory; }
@@ -1097,6 +1377,10 @@ const DMEngine = (() => {
     getAP, consumeAP, resetAP, setAPMax,
     generateScenarioFromSurvey,
     applyNarrativeEffect,
+    applyOutcome,
+    handleDoorInteraction,
+    endTurn,
+    validateInteraction,
     addFact, getFacts, validateNarration,
     saveState, loadState,
     // ===== 统一GameState API（Phase 1新增） =====

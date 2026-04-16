@@ -302,6 +302,108 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
   }
+// Phase 2: 构建交互ActionOutcome
+  function buildInteractionOutcome(type, name, gx, gz) {
+    const isLight = SceneManager.getObjectAt(gx, gz)?.isLight;
+
+    // 灯光类物件
+    if (isLight) {
+      const isOn = SceneManager.getObjectAt(gx, gz)?.isOn;
+      if (isOn) {
+        // 当前亮→关灯
+        return ActionResolver.makeOutcome({
+          success: true, consumesAp: 1,
+          logs: [`你关掉了${name}，黑暗重新笼罩。`],
+          stateChanges: [
+            { type: 'object', gx, gz, field: 'isOn', value: false }
+          ],
+          narrationHint: `你关掉了${name}，黑暗重新笼罩。`,
+          requiresRender: true,
+          resultType: ActionResolver.RESULT_TYPES.SUCCESS
+        });
+      } else {
+        // 当前灭→开灯
+        return ActionResolver.makeOutcome({
+          success: true, consumesAp: 1,
+          logs: [`你打开了${name}，光芒驱散了周围的黑暗。`],
+          stateChanges: [
+            { type: 'object', gx, gz, field: 'isOn', value: true }
+          ],
+          narrationHint: `你打开了${name}，光芒驱散了周围的黑暗。`,
+          requiresRender: true,
+          resultType: ActionResolver.RESULT_TYPES.SUCCESS
+        });
+      }
+    }
+
+    // 门类物件
+    if (type === 'door') {
+      const isOpen = SceneManager.getObjectAt(gx, gz)?.isOn; // door的isOn=isOpen
+      if (isOpen) {
+        return ActionResolver.makeOutcome({
+          success: true, consumesAp: 1,
+          logs: [`你关上了${name}。`],
+          stateChanges: [
+            { type: 'object', gx, gz, field: 'isOn', value: false },
+            { type: 'object', gx, gz, field: 'isOpen', value: false }
+          ],
+          narrationHint: `你关上了${name}。`,
+          requiresRender: true,
+          resultType: ActionResolver.RESULT_TYPES.SUCCESS
+        });
+      } else {
+        return ActionResolver.makeOutcome({
+          success: true, consumesAp: 1,
+          logs: [`你推开了${name}，门轴发出刺耳的声响。`],
+          stateChanges: [
+            { type: 'object', gx, gz, field: 'isOn', value: true },
+            { type: 'object', gx, gz, field: 'isOpen', value: true }
+          ],
+          narrationHint: `你推开了${name}，门轴发出刺耳的声响。`,
+          requiresRender: true,
+          resultType: ActionResolver.RESULT_TYPES.SUCCESS
+        });
+      }
+    }
+
+    // 其他物件：调查检定
+    const skillMap = {
+      bookshelf: '图书馆使用', desk: '图书馆使用', table: '侦查',
+      chest: '锁匠', crate: '侦查', barrel: '侦查',
+      altar: '神秘学', statue: '神秘学', mirror: '侦查',
+      painting: '艺术', wardrobe: '侦查', bed: '侦查',
+      skeleton: '医学', rug: '侦查', fireplace: '侦查'
+    };
+    const skill = skillMap[type] || '侦查';
+    const player = GameState.getPlayer();
+    const skillValue = player.skills[skill] || CoCRules.calcSkillBase(skill, player.stats);
+    const check = CoCRules.rollCheck(skillValue);
+    let narration = `[${skill}检定: ${check.roll}/${skillValue} → ${check.result}] `;
+    if (check.isSuccess) {
+      const discoveries = [
+        `你在${name}上发现了值得注意的痕迹...`,
+        `仔细检查${name}后，你找到了一些线索。`,
+        `${name}中隐藏着不为人知的秘密...`,
+        `你对${name}的检查有了收获！`
+      ];
+      narration += discoveries[Math.floor(Math.random() * discoveries.length)];
+    } else {
+      narration += `你仔细检查了${name}，但没有发现什么特别的东西。`;
+    }
+
+    return ActionResolver.makeOutcome({
+      success: true, consumesAp: 1,
+      logs: [narration],
+      stateChanges: [
+        { type: 'object', gx, gz, field: 'searchCount', delta: 1 },
+        { type: 'object_state_advance', gx, gz }
+      ],
+      narrationHint: narration,
+      requiresRender: false,
+      resultType: ActionResolver.RESULT_TYPES.SUCCESS
+    });
+  }
+
   function finishStartGame() {
     try { loadCurrentScene(); } catch(e) {}
     UI.updateHUD(); UI.addNarration(DMEngine.getNarration(), 'dm'); showChoices(DMEngine.getChoices());
@@ -313,10 +415,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // 设置3D物件交互回调
     if (typeof SceneManager !== 'undefined' && SceneManager.setObjectInteractionHandler) {
       SceneManager.setObjectInteractionHandler((type, name, gx, gz) => {
-        // 距离检查：必须相邻才能交互
-        if (!SceneManager.canInteract(gx, gz)) {
-          const dist = SceneManager.getInteractDistance(gx, gz).toFixed(1);
-          UI.addNarration(`你离${name}太远了（距离${dist}格），需要走近才能交互。`, 'system');
+        // Phase 5: 三校验（同房间、可见、在交互距离内）
+        const validation = DMEngine.validateInteraction(gx, gz);
+        if (!validation.valid) {
+          UI.addNarration(validation.feedback, 'system');
           return;
         }
 
@@ -330,61 +432,19 @@ document.addEventListener('DOMContentLoaded', () => {
           SceneManager.setPlayerFacing(gx, gz);
         }
 
-        // 灯光类物件：开关灯
-        const isLight = SceneManager.getObjectAt(gx, gz)?.isLight;
-        if (isLight) {
-          const isOn = SceneManager.toggleObjectLight(gx, gz);
-          if (isOn) {
-            UI.addNarration(`你打开了${name}，光芒驱散了周围的黑暗。`, 'dm');
-            // 开灯后更新迷雾
-            updateFog();
-          } else {
-            UI.addNarration(`你关掉了${name}，黑暗重新笼罩。`, 'dm');
+        // Phase 2: 通过ActionOutcome统一处理
+        const outcome = buildInteractionOutcome(type, name, gx, gz);
+        if (outcome) {
+          // 应用状态变更
+          const result = DMEngine.applyOutcome(outcome);
+          // 显示叙事
+          UI.addNarration(outcome.narrationHint || outcome.logs.join('\n'), 'dm');
+          // 需要渲染更新
+          if (result.renderNeeded || outcome.requiresRender) {
             updateFog();
           }
           UI.updateHUD(); GameState.saveGame();
-          return;
         }
-
-        // 门类物件：开关门
-        if (type === 'door') {
-          const isOpen = SceneManager.toggleDoor(gx, gz);
-          if (isOpen) {
-            UI.addNarration(`你推开了${name}，门轴发出刺耳的声响。`, 'dm');
-          } else {
-            UI.addNarration(`你关上了${name}。`, 'dm');
-          }
-          UI.updateHUD(); GameState.saveGame();
-          return;
-        }
-
-        // 其他物件：调查检定
-        UI.addNarration(`🔍 你调查了${name}...`, 'player');
-        const skillMap = {
-          bookshelf: '图书馆使用', desk: '图书馆使用', table: '侦查',
-          chest: '锁匠', crate: '侦查', barrel: '侦查',
-          altar: '神秘学', statue: '神秘学', mirror: '侦查',
-          painting: '艺术', wardrobe: '侦查', bed: '侦查',
-          skeleton: '医学', rug: '侦查', fireplace: '侦查'
-        };
-        const skill = skillMap[type] || '侦查';
-        const player = GameState.getPlayer();
-        const skillValue = player.skills[skill] || CoCRules.calcSkillBase(skill, player.stats);
-        const check = CoCRules.rollCheck(skillValue);
-        let narration = `[${skill}检定: ${check.roll}/${skillValue} → ${check.result}] `;
-        if (check.isSuccess) {
-          const discoveries = [
-            `你在${name}上发现了值得注意的痕迹...`,
-            `仔细检查${name}后，你找到了一些线索。`,
-            `${name}中隐藏着不为人知的秘密...`,
-            `你对${name}的检查有了收获！`
-          ];
-          narration += discoveries[Math.floor(Math.random() * discoveries.length)];
-        } else {
-          narration += `你仔细检查了${name}，但没有发现什么特别的东西。`;
-        }
-        UI.addNarration(narration, 'dm');
-        UI.updateHUD(); GameState.saveGame();
       });
     }
   }
@@ -401,10 +461,53 @@ document.addEventListener('DOMContentLoaded', () => {
     const actions = document.getElementById('quick-actions'); if (!actions) return; actions.innerHTML = '';
     const apDiv = document.createElement('div'); apDiv.className='ap-display'; apDiv.id='ap-display';
     const ap = DMEngine.getAP(); apDiv.textContent = `⚡AP:${ap.current}/${ap.max}`; actions.appendChild(apDiv);
+    // 背包按钮（Phase 4）
+    const invBtn = document.createElement('button'); invBtn.className='action-btn'; invBtn.textContent='🎒 背包';
+    invBtn.addEventListener('click', showInventory);
+    actions.appendChild(invBtn);
     const endBtn = document.createElement('button'); endBtn.className='action-btn'; endBtn.textContent='⏭ 结束回合';
-    endBtn.addEventListener('click', () => { DMEngine.resetAP(); UI.updateHUD(); UI.addNarration('回合结束，行动点数已恢复。','system'); showChoices(DMEngine.getChoices()); });
+    endBtn.addEventListener('click', () => {
+      // Phase 5: 通过endTurn唯一入口
+      const result = DMEngine.endTurn('manual');
+      UI.updateHUD();
+      UI.addNarration(`回合${result.turnCount}结束，行动点数已恢复。`, 'system');
+      showChoices(DMEngine.getChoices());
+    });
     actions.appendChild(endBtn);
     choices.forEach(c => { const btn = document.createElement('button'); btn.className='action-btn'; btn.textContent=c.text; btn.addEventListener('click',()=>handleChoice(c.action)); actions.appendChild(btn); });
+  }
+
+  // Phase 4: 背包面板
+  function showInventory() {
+    const panel = document.getElementById('inventory-panel');
+    const list = document.getElementById('inventory-list');
+    if (!panel || !list) return;
+
+    const inventory = DMEngine.getInventory();
+    if (inventory.length === 0) {
+      list.innerHTML = '<p style="color:var(--text-dim);">背包是空的。</p>';
+    } else {
+      list.innerHTML = inventory.map((item, i) =>
+        `<div style="padding:8px; border-bottom:1px solid #2a2a3e; display:flex; justify-content:space-between; align-items:center;">
+          <span style="color:var(--text-primary);">📦 ${item}</span>
+          <button class="inv-use-btn" data-idx="${i}" style="background:var(--accent); color:#1a1a1a; border:none; border-radius:4px; padding:2px 8px; cursor:pointer; font-size:0.8em;">使用</button>
+        </div>`
+      ).join('');
+      // 绑定使用按钮
+      list.querySelectorAll('.inv-use-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.dataset.idx);
+          const item = inventory[idx];
+          UI.addNarration(`你使用了${item}...`, 'player');
+          // TODO: 物品使用逻辑（Phase 4后续）
+          showInventory(); // 刷新
+        });
+      });
+    }
+
+    panel.style.display = 'block';
+    // 关闭按钮
+    document.getElementById('inventory-close')?.addEventListener('click', () => { panel.style.display = 'none'; });
   }
 
   function handleChoice(actionId) {
@@ -445,7 +548,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // 本地可执行指令处理 — 通过RoomInteraction统一执行器
-  // 返回ActionResult对象（含success/verb/message/uiHint）或null
+  // Phase 2: 返回ActionOutcome（通过fromActionResult桥接）
   function tryLocalAction(text) {
     if (typeof RoomInteraction === 'undefined') return null;
 
@@ -457,25 +560,30 @@ document.addEventListener('DOMContentLoaded', () => {
     const room = RoomInteraction.buildRoomState(sceneObjects, pp, scene);
 
     // 走统一执行器
-    const result = RoomInteraction.executePlayerInput(text, room);
+    const actionResult = RoomInteraction.executePlayerInput(text, room);
 
-    if (!result) return null;
+    if (!actionResult) return null;
+
+    // Phase 2: 桥接为ActionOutcome
+    const outcome = ActionResolver.fromActionResult(actionResult);
 
     // 处理UI提示
-    if (result.uiHint?.highlightTargetId) {
-      // 找到目标对象并高亮
-      const targetObj = sceneObjects.find(o => (o.id || `${o.type}_${o.gridX}_${o.gridZ}`) === result.uiHint.highlightTargetId);
+    if (outcome?.uiHint?.highlightTargetId) {
+      const targetObj = sceneObjects.find(o => (o.id || `${o.type}_${o.gridX}_${o.gridZ}`) === outcome.uiHint.highlightTargetId);
       if (targetObj && SceneManager.highlightObject) {
         SceneManager.highlightObject(targetObj.gridX, targetObj.gridZ, 1200);
       }
     }
 
-    // 成功的灯光操作→更新迷雾
-    if (result.success && (result.verb === 'turn_on' || result.verb === 'ignite' || result.verb === 'turn_off' || result.verb === 'extinguish')) {
-      updateFog();
+    // 成功的灯光操作→应用Outcome+更新迷雾
+    if (outcome && outcome.success) {
+      DMEngine.applyOutcome(outcome);
+      if (outcome.requiresRender) {
+        updateFog();
+      }
     }
 
-    return result;
+    return outcome;
   }
 
   // 文本指令输入（AI优先）
@@ -487,16 +595,15 @@ document.addEventListener('DOMContentLoaded', () => {
     UI.addNarration(`> ${text}`, 'player'); input.value = '';
 
     // 优先处理本地可执行指令（灯光/门/距离敏感操作）
-    const localResult = tryLocalAction(text);
-    if (localResult) {
-      // 根据结果类型决定是否扣AP：describe/flavor/move不扣AP，交互操作扣1AP
-      const isFreeAction = !localResult.verb || localResult.verb === 'approach'
-        || localResult.code === 'TARGET_NOT_FOUND' || localResult.code === 'TARGET_NOT_VISIBLE'
-        || localResult.code === 'OUT_OF_RANGE' || localResult.code === 'AMBIGUOUS_TARGET';
-      if (!isFreeAction && localResult.success) {
+    const localOutcome = tryLocalAction(text);
+    if (localOutcome) {
+      // 根据Outcome决定是否扣AP
+      const isFreeAction = !localOutcome.success || localOutcome.consumesAp === 0
+        || localOutcome.resultType === 'need_approach' || localOutcome.resultType === 'ambiguous' || localOutcome.resultType === 'no_target';
+      if (!isFreeAction && localOutcome.success) {
         if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！请结束回合。', 'system'); return; }
       }
-      UI.addNarration(localResult.message || '', 'dm');
+      UI.addNarration(localOutcome.narrationHint || localOutcome.logs.join('\n') || '', 'dm');
       UI.updateHUD(); GameState.saveGame(); return;
     }
 

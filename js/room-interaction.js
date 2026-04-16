@@ -38,7 +38,7 @@ const RoomInteraction = (() => {
     }
 
     // interact — 对明确目标执行动作
-    if (/开灯|关灯|打开灯|点灯|调查|查看|观察|生火|点燃|点火|进入|出去|离开|推|检查|搜索|打开|翻开|吹灭|熄火|关掉/.test(t)) {
+    if (/开灯|关灯|打开灯|点灯|调查|查看|观察|生火|点燃|点火|进入|出去|离开|推|检查|搜索|打开|翻开|吹灭|熄火|关掉|拿|拾取|捡|拾起/.test(t)) {
       return 'interact';
     }
 
@@ -84,6 +84,9 @@ const RoomInteraction = (() => {
 
     // 推
     if (/推/.test(t)) return 'push';
+
+    // 拾取
+    if (/拿|拾取|捡|拾起/.test(t)) return 'pickup';
 
     // toggle_light — 兼容旧动作名
     if (/开关灯|切换灯/.test(t)) return 'toggle_light';
@@ -303,6 +306,19 @@ const RoomInteraction = (() => {
 
     // inspect / investigate — 调查检定
     if (verb === 'inspect') {
+      // Phase 4: 检查对象状态机，已resolved的对象不可再调查
+      if (typeof DMEngine !== 'undefined' && DMEngine.canSearchObject) {
+        if (!DMEngine.canSearchObject(ref?.gridX, ref?.gridZ)) {
+          return {
+            success: false,
+            code: 'ACTION_NOT_ALLOWED',
+            targetId: target.id,
+            verb,
+            message: `你已经彻底调查过${target.name}了，不会再有新的发现。`
+          };
+        }
+      }
+
       // 不扣AP（由game.js统一扣），只返回调查文案
       const skillMap = {
         bookshelf: '图书馆使用', desk: '图书馆使用', table: '侦查',
@@ -327,6 +343,10 @@ const RoomInteraction = (() => {
         message = `[${skill}检定: ${checkResult.roll}/${checkResult.value} → ${checkResult.result}] `;
         if (checkResult.isSuccess) {
           message += getInspectSuccessText(target, ref);
+          // Phase 4: 调查成功→推进对象状态机
+          if (typeof DMEngine !== 'undefined' && DMEngine.advanceObjectState) {
+            DMEngine.advanceObjectState(ref?.gridX, ref?.gridZ);
+          }
         } else {
           message += `你仔细检查了${target.name}，但没有发现什么特别的东西。`;
         }
@@ -514,6 +534,52 @@ const RoomInteraction = (() => {
           highlightTargetId: target.id,
           suggestedAction: '先移动靠近目标'
         }
+      };
+    }
+
+    // pickup / take — 拾取物品
+    if (verb === 'pickup' || verb === 'take') {
+      // 检查是否已被拿走
+      if (ref?.taken) {
+        return {
+          success: false,
+          code: 'ACTION_NOT_ALLOWED',
+          targetId: target.id,
+          verb,
+          message: `${target.name}已经被拿走了。`
+        };
+      }
+      // 检查是否可拾取（只有特定类型可以拾取）
+      const pickupableTypes = ['chest', 'crate', 'barrel', 'bookshelf', 'desk', 'table', 'lamp', 'candle'];
+      if (!pickupableTypes.includes(ref?.type)) {
+        return {
+          success: false,
+          code: 'ACTION_NOT_ALLOWED',
+          targetId: target.id,
+          verb,
+          message: `${target.name}无法被拿走。`
+        };
+      }
+      // 执行拾取：标记taken + 加入inventory + 场景移除
+      if (ref) ref.taken = true;
+      if (typeof DMEngine !== 'undefined' && DMEngine.getInventory) {
+        const inv = DMEngine.getInventory();
+        const itemName = target.name || ref?.type || '物品';
+        if (!inv.includes(itemName)) {
+          inv.push(itemName);
+        }
+      }
+      // 从场景移除（视觉上隐藏）
+      if (ref) {
+        ref.visible = false;
+        ref.interactable = false;
+      }
+      return {
+        success: true,
+        code: 'OK',
+        targetId: target.id,
+        verb: 'pickup',
+        message: `你拿起了${target.name}，放进了背包。`
       };
     }
 

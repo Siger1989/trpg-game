@@ -93,6 +93,15 @@
         <!-- JS动态填充，由DMEngine.getChoices()驱动 -->
       </div>
 
+      <!-- 背包面板（Phase 4） -->
+      <div id="inventory-panel" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:900; background:rgba(20,20,31,0.95); border:1px solid var(--accent); border-radius:8px; padding:16px; max-width:320px; width:90%; max-height:60vh; overflow-y:auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="color:var(--accent); margin:0;">🎒 背包</h3>
+          <button id="inventory-close" style="background:none; border:none; color:var(--text-dim); font-size:1.2em; cursor:pointer;">✕</button>
+        </div>
+        <div id="inventory-list" style="color:var(--text-secondary);"></div>
+      </div>
+
       <!-- 叙事面板 -->
       <div class="hud-narrative" id="narrative-panel">
         <div class="narrative-resize-handle" id="narrative-resize-handle"></div>
@@ -233,19 +242,20 @@
   <!-- 游戏模块 -->
   <script src="js/coc-rules.js?v=20260416e"></script>
   <!-- 架构模块（方案A/B/C） -->
-  <script src="js/scene-compiler.js?v=20260416e"></script>
-  <script src="js/input-interpreter.js?v=20260416e"></script>
-  <script src="js/action-resolver.js?v=20260416e"></script>
+  <script src="js/scene-compiler.js?v=20260416f"></script>
+  <script src="js/input-interpreter.js?v=20260416f"></script>
+  <script src="js/action-resolver.js?v=20260416f"></script>
+  <script src="js/room-templates.js?v=20260416f"></script>
   <!-- 场景感知与动作队列（方案D） -->
   <script src="js/scene-perception.js?v=20260416e"></script>
   <script src="js/action-queue.js?v=20260416e"></script>
   <!-- 场景与交互 -->
-  <script src="js/scene-manager.js?v=20260416e"></script>
-  <script src="js/room-interaction.js?v=20260416e"></script>
+  <script src="js/scene-manager.js?v=20260416f"></script>
+  <script src="js/room-interaction.js?v=20260416f"></script>
   <script src="js/combat.js?v=20260416e"></script>
   <script src="js/fog-of-war.js?v=20260416e"></script>
   <script src="js/ai-dm.js?v=20260416e"></script>
-  <script src="js/dm-engine.js?v=20260416e"></script>
-  <script src="js/game.js?v=20260416e"></script>
+  <script src="js/dm-engine.js?v=20260416f"></script>
+  <script src="js/game.js?v=20260416f"></script>
 </body>
 </html>

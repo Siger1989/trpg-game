@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>手机屏幕预览器 - 暗夜跑团</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a2e;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  color: #e0e0e0;
+}
+.toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+.toolbar button {
+  background: #16213e;
+  color: #e0e0e0;
+  border: 1px solid #0f3460;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+.toolbar button:hover { background: #0f3460; }
+.toolbar button.active { background: #e94560; border-color: #e94560; }
+.toolbar select {
+  background: #16213e;
+  color: #e0e0e0;
+  border: 1px solid #0f3460;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.toolbar label { font-size: 13px; color: #aaa; }
+
+/* 手机外壳 */
+.phone-frame {
+  position: relative;
+  background: #111;
+  border-radius: 40px;
+  padding: 12px;
+  box-shadow:
+    0 0 0 2px #333,
+    0 0 0 4px #1a1a1a,
+    0 20px 60px rgba(0,0,0,0.5);
+}
+.phone-notch {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120px;
+  height: 24px;
+  background: #111;
+  border-radius: 0 0 14px 14px;
+  z-index: 10;
+}
+.phone-screen {
+  border-radius: 28px;
+  overflow: hidden;
+  background: #000;
+  position: relative;
+}
+.phone-screen iframe {
+  border: none;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 控制台日志 */
+.console-panel {
+  margin-top: 16px;
+  width: 400px;
+  max-width: 90vw;
+}
+.console-panel h3 {
+  font-size: 13px;
+  color: #888;
+  margin-bottom: 6px;
+}
+.console-log {
+  background: #0d0d0d;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 8px;
+  height: 150px;
+  overflow-y: auto;
+  font-family: 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.console-log .log-info { color: #4fc3f7; }
+.console-log .log-warn { color: #ffb74d; }
+.console-log .log-error { color: #ef5350; }
+.console-log .log-debug { color: #81c784; }
+
+/* 尺寸信息 */
+.size-info {
+  position: absolute;
+  bottom: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: #666;
+  white-space: nowrap;
+}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <label>设备:</label>
+  <select id="deviceSelect" onchange="changeDevice()">
+    <option value="iphone15">iPhone 15 (390×844)</option>
+    <option value="iphone15pm">iPhone 15 Pro Max (430×932)</option>
+    <option value="pixel7">Pixel 7 (412×915)</option>
+    <option value="galaxy_s23">Galaxy S23 (360×780)</option>
+    <option value="ipad">iPad Mini (768×1024)</option>
+  </select>
+  <label>缩放:</label>
+  <select id="scaleSelect" onchange="changeDevice()">
+    <option value="0.55">55%</option>
+    <option value="0.65" selected>65%</option>
+    <option value="0.75">75%</option>
+    <option value="0.85">85%</option>
+    <option value="1.0">100%</option>
+  </select>
+  <button onclick="reloadGame()">🔄 刷新</button>
+  <button id="consoleBtn" onclick="toggleConsole()">📋 控制台</button>
+</div>
+
+<div class="phone-frame" id="phoneFrame">
+  <div class="phone-notch"></div>
+  <div class="phone-screen" id="phoneScreen">
+    <iframe id="gameFrame" src="index.html" allow="autoplay"></iframe>
+  </div>
+  <div class="size-info" id="sizeInfo">390 × 844 @ 65%</div>
+</div>
+
+<div class="console-panel" id="consolePanel" style="display:none;">
+  <h3>📋 控制台日志</h3>
+  <div class="console-log" id="consoleLog"></div>
+</div>
+
+<script>
+const devices = {
+  iphone15:   { w: 390, h: 844, name: 'iPhone 15' },
+  iphone15pm: { w: 430, h: 932, name: 'iPhone 15 Pro Max' },
+  pixel7:     { w: 412, h: 915, name: 'Pixel 7' },
+  galaxy_s23: { w: 360, h: 780, name: 'Galaxy S23' },
+  ipad:       { w: 768, h: 1024, name: 'iPad Mini' },
+};
+
+function changeDevice() {
+  const dev = devices[document.getElementById('deviceSelect').value];
+  const scale = parseFloat(document.getElementById('scaleSelect').value);
+  const screen = document.getElementById('phoneScreen');
+  const frame = document.getElementById('gameFrame');
+  
+  const sw = Math.round(dev.w * scale);
+  const sh = Math.round(dev.h * scale);
+  
+  screen.style.width = sw + 'px';
+  screen.style.height = sh + 'px';
+  frame.style.width = dev.w + 'px';
+  frame.style.height = dev.h + 'px';
+  frame.style.transform = `scale(${scale})`;
+  frame.style.transformOrigin = 'top left';
+  
+  document.getElementById('sizeInfo').textContent = 
+    `${dev.w} × ${dev.h} @ ${Math.round(scale*100)}% (显示 ${sw}×${sh})`;
+}
+
+function reloadGame() {
+  const frame = document.getElementById('gameFrame');
+  frame.src = frame.src;
+}
+
+function toggleConsole() {
+  const panel = document.getElementById('consolePanel');
+  const btn = document.getElementById('consoleBtn');
+  if (panel.style.display === 'none') {
+    panel.style.display = 'block';
+    btn.classList.add('active');
+    injectConsoleCapture();
+  } else {
+    panel.style.display = 'none';
+    btn.classList.remove('active');
+  }
+}
+
+function injectConsoleCapture() {
+  try {
+    const frame = document.getElementById('gameFrame');
+    const win = frame.contentWindow;
+    if (!win) return;
+    
+    const origLog = win.console.log;
+    const origWarn = win.console.warn;
+    const origError = win.console.error;
+    
+    win.console.log = function(...args) {
+      addLog('info', args.join(' '));
+      origLog.apply(win.console, args);
+    };
+    win.console.warn = function(...args) {
+      addLog('warn', args.join(' '));
+      origWarn.apply(win.console, args);
+    };
+    win.console.error = function(...args) {
+      addLog('error', args.join(' '));
+      origError.apply(win.console, args);
+    };
+    
+    // 捕获运行时错误
+    win.addEventListener('error', function(e) {
+      addLog('error', `❌ ${e.message} (${e.filename}:${e.lineno})`);
+    });
+  } catch(e) {
+    addLog('warn', '跨域限制，无法捕获iframe内部日志');
+  }
+}
+
+function addLog(type, msg) {
+  const log = document.getElementById('consoleLog');
+  const time = new Date().toLocaleTimeString('zh-CN', {hour12:false});
+  const div = document.createElement('div');
+  div.className = 'log-' + type;
+  div.textContent = `[${time}] ${msg}`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+// iframe加载完成后注入控制台捕获
+document.getElementById('gameFrame').addEventListener('load', function() {
+  setTimeout(injectConsoleCapture, 500);
+});
+
+// 初始化
+changeDevice();
+</script>
+</body>
+</html>

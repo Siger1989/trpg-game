@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📱 手机预览器</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #e0e0e0;
+}
+.phone-frame {
+  position: relative;
+  width: 390px;
+  height: 844px;
+  border-radius: 44px;
+  background: #000;
+  padding: 12px;
+  box-shadow: 0 0 0 3px #333, 0 0 0 6px #1a1a1a, 0 20px 60px rgba(0,0,0,0.5);
+}
+.phone-screen {
+  width: 100%;
+  height: 100%;
+  border-radius: 34px;
+  overflow: hidden;
+  background: #000;
+}
+.phone-screen iframe {
+  width: 375px;
+  height: 812px;
+  border: none;
+  transform-origin: top left;
+}
+.phone-notch {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 160px;
+  height: 34px;
+  background: #000;
+  border-radius: 0 0 20px 20px;
+  z-index: 10;
+}
+.phone-notch::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 10px;
+  background: #1a1a2e;
+  border-radius: 50%;
+}
+.controls {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.controls button {
+  padding: 8px 16px;
+  background: #2d2d44;
+  color: #e0e0e0;
+  border: 1px solid #444;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.controls button:hover { background: #3d3d54; }
+.controls button.active { background: #4a6fa5; border-color: #6a8fc5; }
+.info {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #666;
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+<div class="controls">
+  <button onclick="setSize(375,844)" class="active" id="btn-iphone14">iPhone 14</button>
+  <button onclick="setSize(390,844)" id="btn-iphone15">iPhone 15 Pro</button>
+  <button onclick="setSize(414,896)" id="btn-iphonexs">iPhone XS Max</button>
+  <button onclick="setSize(360,780)" id="btn-android">Android 中等</button>
+  <button onclick="setSize(320,568)" id="btn-iphone5">iPhone SE</button>
+  <button onclick="reload()">🔄 刷新</button>
+</div>
+
+<div class="phone-frame" id="phoneFrame">
+  <div class="phone-notch"></div>
+  <div class="phone-screen">
+    <iframe id="gameFrame" src="index.html" allow="autoplay; fullscreen"></iframe>
+  </div>
+</div>
+
+<div class="info">📱 手机预览器 — 模拟移动端显示效果</div>
+
+<script>
+const frame = document.getElementById('gameFrame');
+const phoneFrame = document.getElementById('phoneFrame');
+
+function setSize(w, h) {
+  // iframe实际尺寸
+  frame.style.width = w + 'px';
+  frame.style.height = h + 'px';
+  // 手机外壳按比例缩放
+  const screenDiv = frame.parentElement;
+  const maxH = window.innerHeight - 80;
+  const maxW = window.innerWidth - 200;
+  const scale = Math.min(maxW / (w + 24), maxH / (h + 24), 1);
+  screenDiv.style.width = w + 'px';
+  screenDiv.style.height = h + 'px';
+  screenDiv.style.transform = `scale(${scale})`;
+  screenDiv.style.transformOrigin = 'top left';
+  phoneFrame.style.width = (w + 24) * scale + 'px';
+  phoneFrame.style.height = (h + 24) * scale + 'px';
+  phoneFrame.style.padding = '12px';
+  // 按钮高亮
+  document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+function reload() {
+  frame.src = frame.src;
+}
+
+// 初始化缩放
+window.addEventListener('load', () => {
+  setSize(375, 844);
+});
+window.addEventListener('resize', () => {
+  const w = parseInt(frame.style.width) || 375;
+  const h = parseInt(frame.style.height) || 844;
+  const screenDiv = frame.parentElement;
+  const maxH = window.innerHeight - 80;
+  const maxW = window.innerWidth - 200;
+  const scale = Math.min(maxW / (w + 24), maxH / (h + 24), 1);
+  screenDiv.style.transform = `scale(${scale})`;
+  phoneFrame.style.width = (w + 24) * scale + 'px';
+  phoneFrame.style.height = (h + 24) * scale + 'px';
+});
+</script>
+</body>
+</html>
