@@ -382,32 +382,32 @@
             }
             return null;
           }
+          
+          // BipTrump/Mixamo/通用骨骼映射
+          const bLLeg = findBone(['l thigh','leftleg','leg_l','left_up_leg','upperleg_l','thigh_l','LeftUpLeg']);
+          const bRLeg = findBone(['r thigh','rightleg','leg_r','right_up_leg','upperleg_r','thigh_r','RightUpLeg']);
+          const bLKnee = findBone(['l calf','leftknee','knee_l','left_low_leg','lowerleg_l','shin_l','LeftLowLeg','calf_l']);
+          const bRKnee = findBone(['r calf','rightknee','knee_r','right_low_leg','lowerleg_r','shin_r','RightLowLeg','calf_r']);
+          const bLArm = findBone(['l upperarm','leftarm','arm_l','left_up_arm','upperarm_l','LeftUpArm']);
+          const bRArm = findBone(['r upperarm','rightarm','arm_r','right_up_arm','upperarm_r','RightUpArm']);
+          const bSpine = findBone(['spine1','spine','chest','torso','body','hips','pelvis']);
+          const bHead = findBone(['head','neck','skull']);
+          
+          console.log('[Preview] 骨骼匹配:', {lLeg:bLLeg?.name, rLeg:bRLeg?.name, lKnee:bLKnee?.name, rKnee:bRKnee?.name, lArm:bLArm?.name, rArm:bRArm?.name, spine:bSpine?.name, head:bHead?.name});
           function sineKF(amp, phase, dur) { return walkTimes.map(t => amp * Math.sin(2 * Math.PI * t / dur + phase)); }
           function cosKF(amp, phase, dur) { return walkTimes.map(t => amp * Math.cos(2 * Math.PI * t / dur + phase)); }
           
           const walkTracks = [];
           const legSwing = 0.4, armSwing = 0.35, kneeSwing = 0.25, bodyBob = 0.03, headSwing = 0.05;
           
-          const lLeg = findBone(['leftleg','leg_l','left_up_leg','upperleg_l','thigh_l','LeftUpLeg']);
-          const rLeg = findBone(['rightleg','leg_r','right_up_leg','upperleg_r','thigh_r','RightUpLeg']);
-          if (lLeg) walkTracks.push(new THREE.NumberKeyframeTrack(lLeg.name+'.rotation[x]',walkTimes,sineKF(legSwing,0,walkDuration)));
-          if (rLeg) walkTracks.push(new THREE.NumberKeyframeTrack(rLeg.name+'.rotation[x]',walkTimes,sineKF(legSwing,Math.PI,walkDuration)));
-          
-          const lKnee = findBone(['leftknee','knee_l','left_low_leg','lowerleg_l','shin_l','LeftLowLeg','calf_l']);
-          const rKnee = findBone(['rightknee','knee_r','right_low_leg','lowerleg_r','shin_r','RightLowLeg','calf_r']);
-          if (lKnee) { const v=walkTimes.map(t=>{const p=Math.sin(2*Math.PI*t/walkDuration);return p<0?-kneeSwing*Math.abs(p):0;}); walkTracks.push(new THREE.NumberKeyframeTrack(lKnee.name+'.rotation[x]',walkTimes,v)); }
-          if (rKnee) { const v=walkTimes.map(t=>{const p=Math.sin(2*Math.PI*t/walkDuration+Math.PI);return p<0?-kneeSwing*Math.abs(p):0;}); walkTracks.push(new THREE.NumberKeyframeTrack(rKnee.name+'.rotation[x]',walkTimes,v)); }
-          
-          const lArm = findBone(['leftarm','arm_l','left_up_arm','upperarm_l','LeftUpArm']);
-          const rArm = findBone(['rightarm','arm_r','right_up_arm','upperarm_r','RightUpArm']);
-          if (lArm) walkTracks.push(new THREE.NumberKeyframeTrack(lArm.name+'.rotation[x]',walkTimes,sineKF(armSwing,Math.PI,walkDuration)));
-          if (rArm) walkTracks.push(new THREE.NumberKeyframeTrack(rArm.name+'.rotation[x]',walkTimes,sineKF(armSwing,0,walkDuration)));
-          
-          const spine = findBone(['spine','chest','torso','body','hips','pelvis']);
-          if (spine) walkTracks.push(new THREE.NumberKeyframeTrack(spine.name+'.position[y]',walkTimes,cosKF(bodyBob,0,walkDuration).map(v=>v+(spine.position?.y||0))));
-          
-          const head = findBone(['head','neck','skull']);
-          if (head) walkTracks.push(new THREE.NumberKeyframeTrack(head.name+'.rotation[y]',walkTimes,sineKF(headSwing,0,walkDuration)));
+          if (bLLeg) walkTracks.push(new THREE.NumberKeyframeTrack(bLLeg.name+'.rotation[x]',walkTimes,sineKF(legSwing,0,walkDuration)));
+          if (bRLeg) walkTracks.push(new THREE.NumberKeyframeTrack(bRLeg.name+'.rotation[x]',walkTimes,sineKF(legSwing,Math.PI,walkDuration)));
+          if (bLKnee) { const v=walkTimes.map(t=>{const p=Math.sin(2*Math.PI*t/walkDuration);return p<0?-kneeSwing*Math.abs(p):0;}); walkTracks.push(new THREE.NumberKeyframeTrack(bLKnee.name+'.rotation[x]',walkTimes,v)); }
+          if (bRKnee) { const v=walkTimes.map(t=>{const p=Math.sin(2*Math.PI*t/walkDuration+Math.PI);return p<0?-kneeSwing*Math.abs(p):0;}); walkTracks.push(new THREE.NumberKeyframeTrack(bRKnee.name+'.rotation[x]',walkTimes,v)); }
+          if (bLArm) walkTracks.push(new THREE.NumberKeyframeTrack(bLArm.name+'.rotation[x]',walkTimes,sineKF(armSwing,Math.PI,walkDuration)));
+          if (bRArm) walkTracks.push(new THREE.NumberKeyframeTrack(bRArm.name+'.rotation[x]',walkTimes,sineKF(armSwing,0,walkDuration)));
+          if (bSpine) walkTracks.push(new THREE.NumberKeyframeTrack(bSpine.name+'.position[y]',walkTimes,cosKF(bodyBob,0,walkDuration).map(v=>v+(bSpine.position?.y||0))));
+          if (bHead) walkTracks.push(new THREE.NumberKeyframeTrack(bHead.name+'.rotation[y]',walkTimes,sineKF(headSwing,0,walkDuration)));
           
           if (walkTracks.length > 0) {
             const walkClip = new THREE.AnimationClip('walk', walkDuration, walkTracks);
@@ -427,13 +427,13 @@
           const runTracks = [];
           const rLegSwing = 0.7, rArmSwing = 0.6, rKneeSwing = 0.5, rBodyBob = 0.06;
           
-          if (lLeg) runTracks.push(new THREE.NumberKeyframeTrack(lLeg.name+'.rotation[x]',runTimes,sineKF2(rLegSwing,0,runDuration)));
-          if (rLeg) runTracks.push(new THREE.NumberKeyframeTrack(rLeg.name+'.rotation[x]',runTimes,sineKF2(rLegSwing,Math.PI,runDuration)));
-          if (lKnee) { const v=runTimes.map(t=>{const p=Math.sin(2*Math.PI*t/runDuration);return p<0?-rKneeSwing*Math.abs(p):0;}); runTracks.push(new THREE.NumberKeyframeTrack(lKnee.name+'.rotation[x]',runTimes,v)); }
-          if (rKnee) { const v=runTimes.map(t=>{const p=Math.sin(2*Math.PI*t/runDuration+Math.PI);return p<0?-rKneeSwing*Math.abs(p):0;}); runTracks.push(new THREE.NumberKeyframeTrack(rKnee.name+'.rotation[x]',runTimes,v)); }
-          if (lArm) runTracks.push(new THREE.NumberKeyframeTrack(lArm.name+'.rotation[x]',runTimes,sineKF2(rArmSwing,Math.PI,runDuration)));
-          if (rArm) runTracks.push(new THREE.NumberKeyframeTrack(rArm.name+'.rotation[x]',runTimes,sineKF2(rArmSwing,0,runDuration)));
-          if (spine) runTracks.push(new THREE.NumberKeyframeTrack(spine.name+'.position[y]',runTimes,cosKF2(rBodyBob,0,runDuration).map(v=>v+(spine.position?.y||0))));
+          if (bLLeg) runTracks.push(new THREE.NumberKeyframeTrack(bLLeg.name+'.rotation[x]',runTimes,sineKF2(rLegSwing,0,runDuration)));
+          if (bRLeg) runTracks.push(new THREE.NumberKeyframeTrack(bRLeg.name+'.rotation[x]',runTimes,sineKF2(rLegSwing,Math.PI,runDuration)));
+          if (bLKnee) { const v=runTimes.map(t=>{const p=Math.sin(2*Math.PI*t/runDuration);return p<0?-rKneeSwing*Math.abs(p):0;}); runTracks.push(new THREE.NumberKeyframeTrack(bLKnee.name+'.rotation[x]',runTimes,v)); }
+          if (bRKnee) { const v=runTimes.map(t=>{const p=Math.sin(2*Math.PI*t/runDuration+Math.PI);return p<0?-rKneeSwing*Math.abs(p):0;}); runTracks.push(new THREE.NumberKeyframeTrack(bRKnee.name+'.rotation[x]',runTimes,v)); }
+          if (bLArm) runTracks.push(new THREE.NumberKeyframeTrack(bLArm.name+'.rotation[x]',runTimes,sineKF2(rArmSwing,Math.PI,runDuration)));
+          if (bRArm) runTracks.push(new THREE.NumberKeyframeTrack(bRArm.name+'.rotation[x]',runTimes,sineKF2(rArmSwing,0,runDuration)));
+          if (bSpine) runTracks.push(new THREE.NumberKeyframeTrack(bSpine.name+'.position[y]',runTimes,cosKF2(rBodyBob,0,runDuration).map(v=>v+(bSpine.position?.y||0))));
           
           if (runTracks.length > 0) {
             const runClip = new THREE.AnimationClip('run', runDuration, runTracks);
