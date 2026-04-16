@@ -1684,6 +1684,27 @@ const SceneManager = (() => {
       playerPos.x = target.x;
       playerPos.z = target.z;
       
+      // 每步移动后更新迷雾视野
+      if (typeof FogOfWar !== 'undefined' && FogOfWar.isInitialized && FogOfWar.isInitialized()) {
+        try {
+          const p = typeof GameState !== 'undefined' ? GameState.getPlayer() : null;
+          const s = typeof DMEngine !== 'undefined' ? DMEngine.getCurrentScene() : null;
+          let effectiveLight = s?.atmosphere?.lightIntensity || 0.3;
+          const sceneObjs = SceneManager.sceneObjects || [];
+          const nearbyLights = sceneObjs.filter(o => o.isLight && o.isOn);
+          for (const light of nearbyLights) {
+            const ldx = (light.gridX || 0) - target.x;
+            const ldz = (light.gridZ || 0) - target.z;
+            const ldist = Math.sqrt(ldx*ldx + ldz*ldz);
+            if (ldist < 8) {
+              const lp = light.type === 'fireplace' ? 3.5 : light.type === 'lamp' ? 2.5 : light.type === 'candle' ? 1.5 : 2.0;
+              effectiveLight += lp * Math.max(0, 1 - ldist / 8);
+            }
+          }
+          FogOfWar.updateVision(target.x, target.z, p?.skills?.['侦查']||25, effectiveLight);
+        } catch(e) {}
+      }
+      
       const worldStart = gridToWorld(prev.x, prev.z);
       const worldTarget = gridToWorld(target.x, target.z);
       
