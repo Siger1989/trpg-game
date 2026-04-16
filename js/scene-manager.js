@@ -255,14 +255,17 @@ const SceneManager = (() => {
 
     currentRoom = { template, width: combatW, height: combatH, wallHeight: wallH, objects: [] };
 
-    // 地板
+    // 地板（程序化纹理）
     const floorGeo = new THREE.PlaneGeometry(combatW * cellSize, combatH * cellSize);
+    const floorTex = generateFloorTexture(template, 99);
+    floorTex.repeat.set(combatW, combatH);
     const floorMat = new THREE.MeshStandardMaterial({
-      color: tpl.floorColor,
+      map: floorTex,
+      color: 0xdddddd,
       roughness: 0.8,
       metalness: 0.05,
       emissive: tpl.floorColor,
-      emissiveIntensity: 0.15  // 提高自发光，让地板在暗光下也可见
+      emissiveIntensity: 0.12
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
@@ -274,8 +277,8 @@ const SceneManager = (() => {
     // 格子线
     drawGrid(combatW, combatH);
 
-    // 墙壁
-    buildWalls(combatW, combatH, wallH, tpl.wallColor);
+    // 墙壁（传入模板类型用于纹理风格）
+    buildWalls(combatW, combatH, wallH, tpl.wallColor, template);
 
     // 氛围设置
     applyAtmosphere(atmosphere || tpl);
@@ -345,22 +348,296 @@ const SceneManager = (() => {
     }
   }
 
-  function buildWalls(w, h, wallH, color) {
+  // ========== 程序化墙面纹理生成器 ==========
+  const WALL_TEXTURE_STYLES = {
+    // 旧宅：剥落灰泥+裂缝
+    old_house: { base: '#8a8070', stain: '#6a6050', crack: '#3a3530', brickChance: 0.15, stainChance: 0.3, crackChance: 0.1 },
+    // 走廊：深色壁纸+水渍
+    corridor: { base: '#5a5550', stain: '#4a4540', crack: '#3a3530', brickChance: 0, stainChance: 0.4, crackChance: 0.05 },
+    // 图书馆：深木镶板
+    library: { base: '#3a2a1a', stain: '#2a1a0a', crack: '#1a1008', brickChance: 0, stainChance: 0.1, crackChance: 0.02, panelLines: true },
+    // 地下室：粗糙石砖+潮湿
+    basement: { base: '#5a5a5a', stain: '#3a4a3a', crack: '#2a2a2a', brickChance: 0.6, stainChance: 0.5, crackChance: 0.2 },
+    // 仪式室：暗红石墙+符文痕迹
+    ritual: { base: '#4a2a2a', stain: '#3a1a1a', crack: '#2a0a0a', brickChance: 0.4, stainChance: 0.2, crackChance: 0.15, runeChance: 0.05 },
+    // 默认：普通灰墙
+    default: { base: '#909090', stain: '#808080', crack: '#606060', brickChance: 0, stainChance: 0.1, crackChance: 0.02 }
+  };
+
+  // 纹理缓存，避免重复生成
+  const wallTextureCache = {};
+
+  function generateWallTexture(styleName, seed) {
+    const cacheKey = styleName + '_' + seed;
+    if (wallTextureCache[cacheKey]) return wallTextureCache[cacheKey];
+
+    const style = WALL_TEXTURE_STYLES[styleName] || WALL_TEXTURE_STYLES.default;
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    // 伪随机数生成器（基于seed）
+    let rng = seed | 0;
+    function rand() { rng = (rng * 1103515245 + 12345) & 0x7fffffff; return rng / 0x7fffffff; }
+
+    // 基础颜色
+    ctx.fillStyle = style.base;
+    ctx.fillRect(0, 0, size, size);
+
+    // 砖块纹理
+    if (style.brickChance > 0) {
+      const brickH = 16;
+      const brickW = 32;
+      for (let row = 0; row < size / brickH; row++) {
+        const offset = (row % 2) * brickW / 2;
+        for (let col = -1; col < size / brickW + 1; col++) {
+          if (rand() > style.brickChance) continue;
+          const x = col * brickW + offset;
+          const y = row * brickH;
+          // 砖缝
+          ctx.strokeStyle = style.crack;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x, y, brickW, brickH);
+          // 砖块颜色变化
+          const brightness = 0.85 + rand() * 0.3;
+          ctx.fillStyle = style.base;
+          ctx.globalAlpha = brightness;
+          ctx.fillRect(x + 1, y + 1, brickW - 2, brickH - 2);
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+
+    // 木镶板线条（图书馆风格）
+    if (style.panelLines) {
+      ctx.strokeStyle = style.stain;
+      ctx.lineWidth = 2;
+      // 竖线
+      for (let x = 0; x < size; x += 64) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, size); ctx.stroke();
+      }
+      // 横线（上下镶板）
+      ctx.beginPath(); ctx.moveTo(0, size * 0.3); ctx.lineTo(size, size * 0.3); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, size * 0.7); ctx.lineTo(size, size * 0.7); ctx.stroke();
+    }
+
+    // 水渍/污渍
+    for (let i = 0; i < 20; i++) {
+      if (rand() > style.stainChance) continue;
+      const x = rand() * size;
+      const y = rand() * size;
+      const r = 10 + rand() * 30;
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, style.stain);
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.globalAlpha = 0.3 + rand() * 0.4;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      ctx.globalAlpha = 1;
+    }
+
+    // 裂缝
+    for (let i = 0; i < 8; i++) {
+      if (rand() > style.crackChance) continue;
+      ctx.strokeStyle = style.crack;
+      ctx.lineWidth = 0.5 + rand() * 1.5;
+      ctx.beginPath();
+      let cx = rand() * size, cy = rand() * size;
+      ctx.moveTo(cx, cy);
+      for (let j = 0; j < 5; j++) {
+        cx += (rand() - 0.5) * 30;
+        cy += rand() * 20;
+        ctx.lineTo(cx, cy);
+      }
+      ctx.stroke();
+    }
+
+    // 符文痕迹（仪式室）
+    if (style.runeChance) {
+      for (let i = 0; i < 5; i++) {
+        if (rand() > style.runeChance) continue;
+        const rx = rand() * size;
+        const ry = rand() * size;
+        ctx.strokeStyle = '#8a2a2a';
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.3;
+        // 简单符文形状
+        ctx.beginPath();
+        ctx.arc(rx, ry, 5 + rand() * 8, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(rx - 5, ry); ctx.lineTo(rx + 5, ry);
+        ctx.moveTo(rx, ry - 5); ctx.lineTo(rx, ry + 5);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // 噪点
+    const imgData = ctx.getImageData(0, 0, size, size);
+    for (let i = 0; i < imgData.data.length; i += 4) {
+      const noise = (rand() - 0.5) * 15;
+      imgData.data[i] = Math.max(0, Math.min(255, imgData.data[i] + noise));
+      imgData.data[i+1] = Math.max(0, Math.min(255, imgData.data[i+1] + noise));
+      imgData.data[i+2] = Math.max(0, Math.min(255, imgData.data[i+2] + noise));
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    wallTextureCache[cacheKey] = texture;
+    return texture;
+  }
+
+  // ========== 程序化地板纹理生成器 ==========
+  const FLOOR_TEXTURE_STYLES = {
+    old_house: { base: '#5a4030', plank: true, plankColor: '#4a3520', gapColor: '#2a1a10' },
+    corridor: { base: '#4a3a2a', plank: true, plankColor: '#3a2a1a', gapColor: '#1a1008' },
+    library: { base: '#3a2818', plank: true, plankColor: '#2a1a0a', gapColor: '#1a0a00' },
+    basement: { base: '#4a4a4a', plank: false, stone: true, stoneColor: '#3a3a3a', gapColor: '#2a2a2a' },
+    ritual: { base: '#3a2a2a', plank: false, stone: true, stoneColor: '#2a1a1a', gapColor: '#1a0a0a' },
+    default: { base: '#5a5040', plank: true, plankColor: '#4a4030', gapColor: '#2a2010' }
+  };
+
+  const floorTextureCache = {};
+
+  function generateFloorTexture(template, seed) {
+    const cacheKey = 'floor_' + template + '_' + seed;
+    if (floorTextureCache[cacheKey]) return floorTextureCache[cacheKey];
+
+    const style = FLOOR_TEXTURE_STYLES[template] || FLOOR_TEXTURE_STYLES.default;
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    let rng = seed | 0;
+    function rand() { rng = (rng * 1103515245 + 12345) & 0x7fffffff; return rng / 0x7fffffff; }
+
+    ctx.fillStyle = style.base;
+    ctx.fillRect(0, 0, size, size);
+
+    if (style.plank) {
+      // 木地板
+      const plankW = 32;
+      for (let x = 0; x < size; x += plankW) {
+        // 木板颜色变化
+        const brightness = 0.8 + rand() * 0.4;
+        ctx.fillStyle = style.plankColor;
+        ctx.globalAlpha = brightness;
+        ctx.fillRect(x, 0, plankW - 1, size);
+        ctx.globalAlpha = 1;
+        // 板缝
+        ctx.fillStyle = style.gapColor;
+        ctx.fillRect(x + plankW - 1, 0, 1, size);
+        // 木纹
+        ctx.strokeStyle = style.gapColor;
+        ctx.globalAlpha = 0.15;
+        ctx.lineWidth = 0.5;
+        for (let y = 0; y < size; y += 4 + rand() * 8) {
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + plankW - 1, y + (rand() - 0.5) * 4);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+    } else if (style.stone) {
+      // 石板地面
+      const tileW = 48;
+      const tileH = 48;
+      for (let row = 0; row < size / tileH; row++) {
+        const offset = (row % 2) * tileW / 2;
+        for (let col = -1; col < size / tileW + 1; col++) {
+          const x = col * tileW + offset;
+          const y = row * tileH;
+          const brightness = 0.85 + rand() * 0.3;
+          ctx.fillStyle = style.stoneColor;
+          ctx.globalAlpha = brightness;
+          ctx.fillRect(x + 1, y + 1, tileW - 2, tileH - 2);
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = style.gapColor;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x, y, tileW, tileH);
+        }
+      }
+    }
+
+    // 噪点
+    const imgData = ctx.getImageData(0, 0, size, size);
+    for (let i = 0; i < imgData.data.length; i += 4) {
+      const noise = (rand() - 0.5) * 12;
+      imgData.data[i] = Math.max(0, Math.min(255, imgData.data[i] + noise));
+      imgData.data[i+1] = Math.max(0, Math.min(255, imgData.data[i+1] + noise));
+      imgData.data[i+2] = Math.max(0, Math.min(255, imgData.data[i+2] + noise));
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    floorTextureCache[cacheKey] = texture;
+    return texture;
+  }
+
+  // 场景类型→纹理风格映射
+  function getWallStyleForTemplate(template) {
+    const map = {
+      corridor: 'corridor',
+      room_small: 'old_house',
+      room_medium: 'old_house',
+      room_large: 'old_house',
+      library: 'library',
+      basement: 'basement',
+      ritual: 'ritual'
+    };
+    return map[template] || 'default';
+  }
+
+  function buildWalls(w, h, wallH, color, template) {
     const halfW = (w * cellSize) / 2;
     const halfH = (h * cellSize) / 2;
-    const wallMat = new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.02, emissive: color, emissiveIntensity: 0.15 });  // 提高自发光
+
+    // 根据场景类型生成墙面纹理
+    const styleName = getWallStyleForTemplate(template);
+    const wallTexture = generateWallTexture(styleName, 42);
+    wallTexture.repeat.set(w, 1); // 水平重复按房间宽度
+
+    const wallMat = new THREE.MeshStandardMaterial({
+      map: wallTexture,
+      color: 0xdddddd, // 纹理着色，略亮让纹理可见
+      roughness: 0.85,
+      metalness: 0.02,
+      emissive: color,
+      emissiveIntensity: 0.12
+    });
 
     // 四面墙
     const walls = [
-      { w: w * cellSize, h: wallH, pos: [0, wallH/2, -halfH], rot: [0, 0, 0] },
-      { w: w * cellSize, h: wallH, pos: [0, wallH/2, halfH], rot: [0, Math.PI, 0] },
-      { w: h * cellSize, h: wallH, pos: [-halfW, wallH/2, 0], rot: [0, Math.PI/2, 0] },
-      { w: h * cellSize, h: wallH, pos: [halfW, wallH/2, 0], rot: [0, -Math.PI/2, 0] }
+      { w: w * cellSize, h: wallH, pos: [0, wallH/2, -halfH], rot: [0, 0, 0], face: 'front' },
+      { w: w * cellSize, h: wallH, pos: [0, wallH/2, halfH], rot: [0, Math.PI, 0], face: 'back' },
+      { w: h * cellSize, h: wallH, pos: [-halfW, wallH/2, 0], rot: [0, Math.PI/2, 0], face: 'left' },
+      { w: h * cellSize, h: wallH, pos: [halfW, wallH/2, 0], rot: [0, -Math.PI/2, 0], face: 'right' }
     ];
 
     walls.forEach(wallDef => {
       const geo = new THREE.PlaneGeometry(wallDef.w, wallDef.h);
-      const mesh = new THREE.Mesh(geo, wallMat);
+      // 每面墙用不同seed的纹理
+      const tex = generateWallTexture(styleName, 42 + walls.indexOf(wallDef) * 7);
+      tex.repeat.set(wallDef.w / cellSize, 1);
+      const mat = new THREE.MeshStandardMaterial({
+        map: tex,
+        color: 0xdddddd,
+        roughness: 0.85,
+        metalness: 0.02,
+        emissive: color,
+        emissiveIntensity: 0.12
+      });
+      const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(...wallDef.pos);
       mesh.rotation.set(...wallDef.rot);
       mesh.castShadow = true;
@@ -368,6 +645,50 @@ const SceneManager = (() => {
       scene.add(mesh);
       gridObjects.push(mesh);
     });
+
+    // 在前墙中间添加门框
+    addDoorToWall(halfH, wallH, 'front');
+  }
+
+  // 在墙上添加门框3D模型
+  function addDoorToWall(halfH, wallH, face) {
+    const doorGroup = new THREE.Group();
+    const doorW = 1.0;
+    const doorH = 2.2;
+
+    // 门框（深色木框，左右+顶部）
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a1a0a, roughness: 0.7, metalness: 0.05 });
+    // 左框
+    const leftFrame = new THREE.Mesh(new THREE.BoxGeometry(0.1, doorH + 0.2, 0.12), frameMat);
+    leftFrame.position.set(-doorW / 2 - 0.05, (doorH + 0.2) / 2, 0);
+    doorGroup.add(leftFrame);
+    // 右框
+    const rightFrame = new THREE.Mesh(new THREE.BoxGeometry(0.1, doorH + 0.2, 0.12), frameMat);
+    rightFrame.position.set(doorW / 2 + 0.05, (doorH + 0.2) / 2, 0);
+    doorGroup.add(rightFrame);
+    // 顶框
+    const topFrame = new THREE.Mesh(new THREE.BoxGeometry(doorW + 0.2, 0.1, 0.12), frameMat);
+    topFrame.position.set(0, doorH + 0.15, 0);
+    doorGroup.add(topFrame);
+
+    // 门板（浅色木门）
+    const doorMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1a, roughness: 0.75, metalness: 0.02 });
+    const doorPanel = new THREE.Mesh(new THREE.BoxGeometry(doorW, doorH, 0.06), doorMat);
+    doorPanel.position.set(0, doorH / 2, 0.03);
+    doorPanel.name = 'doorPanel';
+    doorGroup.add(doorPanel);
+
+    // 门把手
+    const handleMat = new THREE.MeshStandardMaterial({ color: 0xccaa66, roughness: 0.3, metalness: 0.8 });
+    const handle = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), handleMat);
+    handle.position.set(doorW / 2 - 0.12, doorH / 2, 0.07);
+    doorGroup.add(handle);
+
+    // 放置在前墙中间
+    doorGroup.position.set(0, 0, -halfH + 0.01);
+
+    scene.add(doorGroup);
+    gridObjects.push(doorGroup);
   }
 
   function applyAtmosphere(atm) {
@@ -583,6 +904,20 @@ const SceneManager = (() => {
       case 'mirror':
         mesh = createBox(0.8, 1.2, 0.05, tpl.color);
         mesh.position.y = 1.8;
+        break;
+      case 'door':
+        // 门框（深色木框）
+        const doorFrame = createBox(1.0, 2.4, 0.12, 0x2a1a0a);
+        doorFrame.position.y = 1.2;
+        group.add(doorFrame);
+        // 门板（浅色木门）
+        mesh = createBox(0.85, 2.1, 0.06, tpl.color);
+        mesh.position.y = 1.15;
+        // 门把手
+        const handle = createCylinder(0.04, 0.04, 0xccaa66);
+        handle.rotation.z = Math.PI / 2;
+        handle.position.set(0.3, 1.1, 0.05);
+        group.add(handle);
         break;
       default:
         mesh = createBox(0.6, 0.6, 0.6, tpl.color);
