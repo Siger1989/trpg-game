@@ -483,9 +483,9 @@
         }
 
         // 计算模型包围盒，调整相机
-        const box = new THREE.Box3().setFromObject(model);
-        const size = box.getSize(new THREE.Vector3());
-        const center = box.getCenter(new THREE.Vector3());
+        const modelBox = new THREE.Box3().setFromObject(model);
+        const size = modelBox.getSize(new THREE.Vector3());
+        const center = modelBox.getCenter(new THREE.Vector3());
         
         // 自动调整相机距离
         const maxDim = Math.max(size.x, size.y, size.z);
