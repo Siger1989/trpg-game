@@ -838,41 +838,112 @@ const SceneManager = (() => {
     scene.add(startRing);
   }
 
-  // 显示红色轨迹线（AP不足）
-  function showRedPathLine(path) {
+  // 显示混合轨迹线（AP范围内绿色，超出部分红色）
+  function showMixedPathLine(path, apRange) {
     clearPathLine();
     if (!path || path.length < 2 || !scene) return;
 
-    const points = path.map(p => {
-      const w = gridToWorld(p.x, p.z);
-      return new THREE.Vector3(w.x, 0.08, w.z);
-    });
-    const curve = new THREE.CatmullRomCurve3(points);
-    const tubeGeo = new THREE.TubeGeometry(curve, points.length * 8, 0.06, 8, false);
-    const tubeMat = new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.85 });
-    pathLine = new THREE.Mesh(tubeGeo, tubeMat);
-    pathLine.name = 'pathLine';
-    scene.add(pathLine);
+    // apRange: AP能走的步数（path[0]是起点，path[1]是第一步）
+    const greenEnd = Math.min(apRange + 1, path.length); // 绿色路径到第apRange+1个节点
+    const redStart = greenEnd; // 红色从greenEnd开始
 
-    // 目标格子高亮（红色发光环）
-    const endP = path[path.length - 1];
-    const endW = gridToWorld(endP.x, endP.z);
-    const hlGeo = new THREE.RingGeometry(0.25, 0.55, 16);
-    const hlMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 1.0 });
-    pathHighlight = new THREE.Mesh(hlGeo, hlMat);
-    pathHighlight.rotation.x = -Math.PI / 2;
-    pathHighlight.position.set(endW.x, 0.06, endW.z);
-    scene.add(pathHighlight);
+    // 绿色部分
+    if (greenEnd >= 2) {
+      const greenPoints = path.slice(0, greenEnd).map(p => {
+        const w = gridToWorld(p.x, p.z);
+        return new THREE.Vector3(w.x, 0.08, w.z);
+      });
+      const greenCurve = new THREE.CatmullRomCurve3(greenPoints);
+      const greenTube = new THREE.TubeGeometry(greenCurve, greenPoints.length * 8, 0.06, 8, false);
+      const greenMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, transparent: true, opacity: 0.85 });
+      const greenMesh = new THREE.Mesh(greenTube, greenMat);
+      greenMesh.name = 'pathLine';
+      scene.add(greenMesh);
+
+      // 绿色节点球
+      for (let i = 1; i < greenEnd - 1; i++) {
+        const w = gridToWorld(path[i].x, path[i].z);
+        const dotGeo = new THREE.SphereGeometry(0.08, 8, 6);
+        const dotMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, transparent: true, opacity: 0.9 });
+        const dot = new THREE.Mesh(dotGeo, dotMat);
+        dot.position.set(w.x, 0.08, w.z);
+        dot.name = 'pathDot';
+        scene.add(dot);
+      }
+
+      // AP边界格子高亮（绿色发光环）—— 这是AP能到的最远点
+      const apEndP = path[greenEnd - 1];
+      const apEndW = gridToWorld(apEndP.x, apEndP.z);
+      const hlGeo = new THREE.RingGeometry(0.25, 0.55, 16);
+      const hlMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, side: THREE.DoubleSide, transparent: true, opacity: 1.0 });
+      pathHighlight = new THREE.Mesh(hlGeo, hlMat);
+      pathHighlight.rotation.x = -Math.PI / 2;
+      pathHighlight.position.set(apEndW.x, 0.09, apEndW.z);
+      scene.add(pathHighlight);
+    }
+
+    // 红色部分（超出AP范围）
+    if (redStart < path.length) {
+      // 红色从绿色末端开始，确保连续
+      const redPoints = path.slice(redStart - 1).map(p => {
+        const w = gridToWorld(p.x, p.z);
+        return new THREE.Vector3(w.x, 0.08, w.z);
+      });
+      const redCurve = new THREE.CatmullRomCurve3(redPoints);
+      const redTube = new THREE.TubeGeometry(redCurve, redPoints.length * 8, 0.06, 8, false);
+      const redMat = new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.85 });
+      const redMesh = new THREE.Mesh(redTube, redMat);
+      redMesh.name = 'pathLineRed';
+      scene.add(redMesh);
+
+      // 红色节点球
+      for (let i = 1; i < redPoints.length - 1; i++) {
+        const w = gridToWorld(path[redStart + i].x, path[redStart + i].z);
+        const dotGeo = new THREE.SphereGeometry(0.08, 8, 6);
+        const dotMat = new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.9 });
+        const dot = new THREE.Mesh(dotGeo, dotMat);
+        dot.position.set(w.x, 0.08, w.z);
+        dot.name = 'pathDot';
+        scene.add(dot);
+      }
+
+      // 目标格子高亮（红色发光环）
+      const endP = path[path.length - 1];
+      const endW = gridToWorld(endP.x, endP.z);
+      const endGeo = new THREE.RingGeometry(0.25, 0.55, 16);
+      const endMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 1.0 });
+      const endRing = new THREE.Mesh(endGeo, endMat);
+      endRing.rotation.x = -Math.PI / 2;
+      endRing.position.set(endW.x, 0.06, endW.z);
+      endRing.name = 'pathEndRed';
+      scene.add(endRing);
+    }
+
+    // 起点标记（小蓝环）
+    const startP = path[0];
+    const startW = gridToWorld(startP.x, startP.z);
+    const sGeo = new THREE.RingGeometry(0.15, 0.35, 16);
+    const sMat = new THREE.MeshBasicMaterial({ color: 0x4488ff, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+    const startRing = new THREE.Mesh(sGeo, sMat);
+    startRing.rotation.x = -Math.PI / 2;
+    startRing.position.set(startW.x, 0.09, startW.z);
+    startRing.name = 'pathStart';
+    scene.add(startRing);
+  }
+
+  // 显示红色轨迹线（AP不足，无绿色部分时用）
+  function showRedPathLine(path) {
+    showMixedPathLine(path, 0);
   }
 
   // 清除轨迹线
   function clearPathLine() {
     if (pathLine && scene) { scene.remove(pathLine); pathLine.geometry.dispose(); pathLine.material.dispose(); pathLine = null; }
     if (pathHighlight && scene) { scene.remove(pathHighlight); pathHighlight.geometry.dispose(); pathHighlight.material.dispose(); pathHighlight = null; }
-    // 清除路径节点球和起点环
+    // 清除路径节点球、起点环、红色路径、红色终点环
     if (scene) {
       const toRemove = [];
-      scene.traverse(obj => { if (obj.name === 'pathDot' || obj.name === 'pathStart') toRemove.push(obj); });
+      scene.traverse(obj => { if (obj.name === 'pathDot' || obj.name === 'pathStart' || obj.name === 'pathLineRed' || obj.name === 'pathEndRed') toRemove.push(obj); });
       toRemove.forEach(obj => { scene.remove(obj); obj.geometry?.dispose(); obj.material?.dispose(); });
     }
     pathTarget = null;
@@ -955,27 +1026,36 @@ const SceneManager = (() => {
     // 点击自己位置：忽略
     if (gx === pp.x && gz === pp.z) { clearPathLine(); return 'cancel'; }
 
+    // 检查AP
+    const ap = typeof DMEngine !== 'undefined' ? DMEngine.getAP() : { current: 999, max: 999 };
+
     // 检查是否在预览状态，点击的是目标格子
     if (pathTarget && gx === pathTarget.x && gz === pathTarget.z) {
       // 确认移动
       const path = findPath(pp.x, pp.z, gx, gz);
       if (!path) return 'blocked';
       
-      // 检查AP是否足够（每格消耗1 AP）
-      const ap = typeof DMEngine !== 'undefined' ? DMEngine.getAP() : { current: 999, max: 999 };
       const cost = path.length - 1;
       if (ap.current >= cost) {
-        // 扣AP
+        // AP足够，移动到目标
         if (typeof DMEngine !== 'undefined' && DMEngine.consumeAP) {
           DMEngine.consumeAP(cost);
         }
-        // 清除预览并移动
         clearPathLine();
         moveAlongPath(path);
         pathTarget = null;
         return 'move';
+      } else if (ap.current > 0) {
+        // AP不足但>0，移动到AP范围内最远点
+        const partialPath = path.slice(0, ap.current + 1);
+        if (typeof DMEngine !== 'undefined' && DMEngine.consumeAP) {
+          DMEngine.consumeAP(ap.current);
+        }
+        clearPathLine();
+        moveAlongPath(partialPath);
+        pathTarget = null;
+        return 'move';
       } else {
-        showRedPathLine(path);
         return 'blocked';
       }
     }
@@ -984,16 +1064,16 @@ const SceneManager = (() => {
     const path = findPath(pp.x, pp.z, gx, gz);
     if (!path) return 'blocked';
 
-    // 检查AP是否足够
-    const ap = typeof DMEngine !== 'undefined' ? DMEngine.getAP() : { current: 999, max: 999 };
     const cost = path.length - 1;
     if (ap.current >= cost) {
       showPathLine(path);
       pathTarget = { x: gx, z: gz };
       return 'preview';
     } else {
-      showRedPathLine(path);
-      return 'blocked';
+      // AP不足：显示混合路径（绿色=AP范围内，红色=超出部分）
+      showMixedPathLine(path, ap.current);
+      pathTarget = { x: gx, z: gz };
+      return 'preview';
     }
   }
 

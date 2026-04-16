@@ -181,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const img = document.getElementById('char-portrait'); 
     const nameEl = document.getElementById('portrait-name');
     if (img) img.src = 'assets/portraits/' + PORTRAIT_LIST[selectedPortraitIndex].file;
-    if (nameEl) nameEl.textContent = PORTRAIT_LIST[selectedPortraitIndex].name;
+    if (nameEl) nameEl.textContent = (selectedPortraitIndex + 1) + ' / ' + PORTRAIT_LIST.length;
   }
 
   // ========== 块2：问卷流程 ==========
