@@ -25,12 +25,19 @@
   <div id="screen-char-create" class="screen">
     <div class="char-create-layout">
       <!-- 左侧：头像预览 -->
-      <div class="char-preview-panel">
-        <img id="char-portrait" src="assets/portraits/01_Detective.png" alt="角色头像" style="width: 200px; height: 200px; object-fit: cover; border-radius: 8px; border: 2px solid #444;">
-        <div class="char-name-input">
-          <input type="text" id="char-name" placeholder="输入角色名..." maxlength="20">
-        </div>
-      </div>
+<div class="char-preview-panel">
+<div class="portrait-wrapper" style="display:flex;align-items:center;gap:10px;">
+<button id="btn-portrait-prev" class="portrait-btn" style="width:32px;height:48px;font-size:16px;background:#2a2a3a;color:#c9a04e;border:1px solid #444;border-radius:4px;cursor:pointer;">◀</button>
+<div style="position:relative;">
+<img id="char-portrait" src="assets/portraits/01_Detective.png" alt="角色头像" style="width: 200px; height: 200px; object-fit: cover; border-radius: 8px; border: 2px solid #444;">
+<div id="portrait-name" style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.7);color:#c9a04e;text-align:center;padding:4px 0;font-size:14px;border-radius:0 0 6px 6px;">私家侦探</div>
+</div>
+<button id="btn-portrait-next" class="portrait-btn" style="width:32px;height:48px;font-size:16px;background:#2a2a3a;color:#c9a04e;border:1px solid #444;border-radius:4px;cursor:pointer;">▶</button>
+</div>
+<div class="char-name-input" style="margin-top:10px;">
+<input type="text" id="char-name" placeholder="输入角色名..." maxlength="20">
+</div>
+</div>
       <!-- 右侧：属性和选择 -->
       <div class="char-config-panel">
         <div class="config-section">
@@ -38,16 +45,6 @@
           <div class="attr-grid" id="attr-grid">
             <!-- JS动态填充 -->
           </div>
-        </div>
-
-        <div class="config-section">
-          <h3>头像</h3>
-          <div class="portrait-selector">
-            <button id="btn-portrait-prev" class="portrait-btn">◀</button>
-            <img id="char-portrait" src="assets/portraits/01_Detective.png" alt="角色头像" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px; border: 2px solid #444;">
-            <button id="btn-portrait-next" class="portrait-btn">▶</button>
-          </div>
-          <div class="portrait-name" id="portrait-name">私家侦探</div>
         </div>
 
         <div class="config-section">
