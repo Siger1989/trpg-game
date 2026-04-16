@@ -9,6 +9,10 @@ const GameState = (() => {
   function getPlayer() { return player; }
   function createPlayer(data) {
     player = { name: data.name || '调查员', stats: data.stats, derived: data.derived, skills: data.skills, occupation: data.occupation, background: data.background || '', appearance: data.appearance || {}, weapon: '拳头', inventory: [] };
+    // 注册到统一GameState
+    if (typeof DMEngine !== 'undefined' && DMEngine.registerPlayer) {
+      DMEngine.registerPlayer(player);
+    }
     saveGame(); return player;
   }
   function saveGame() { try { localStorage.setItem('trpg_save', JSON.stringify({ player, dmState: DMEngine.saveState() })); } catch(e) {} }

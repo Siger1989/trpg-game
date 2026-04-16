@@ -5,23 +5,112 @@
  */
 
 const DMEngine = (() => {
+  // ========== 统一GameState（唯一状态源） ==========
+  // 结构：{ meta, player, rooms, objects, clues, events, inventory, flags, actionPoints }
+  let gameState = null;
+  // 向后兼容：worldState指向gameState的简化视图
   let worldState = {};
   let narrativeHistory = [];
   let plotState = 'intro';
   let facts = [];
   let npcStates = {};
 
-  // ========== 行动点数系统 ==========
-  let actionPoints = { current: 3, max: 3 };
+  // ========== 对象状态机 ==========
+  const OBJECT_STATES = { UNSEARCHED: 'unsearched', CLUE_FOUND: 'clue_found', RESOLVED: 'resolved' };
+  const OBJECT_DEFAULTS = {
+    visible: true, discovered: false, interactable: true,
+    state: OBJECT_STATES.UNSEARCHED, isOn: false, isOpen: false,
+    searchCount: 0, maxSearch: 1, taken: false, unique: true
+  };
 
-  function getAP() { return { ...actionPoints }; }
-  function consumeAP(cost) {
-    if (actionPoints.current < cost) return false;
-    actionPoints.current -= cost;
+  function createObjectState(objDef, sceneId) {
+    const base = { ...OBJECT_DEFAULTS };
+    // 灯默认灭
+    if (objDef.type === 'lamp' || objDef.type === 'candle' || objDef.type === 'fireplace') {
+      base.isOn = false;
+      base.maxSearch = 0; // 灯不可调查
+    }
+    // 门默认关
+    if (objDef.type === 'door') {
+      base.isOpen = false;
+      base.maxSearch = 0;
+    }
+    // 可调查物件
+    if (['bookshelf', 'desk', 'table', 'chest', 'crate', 'barrel', 'altar', 'statue', 'wardrobe', 'bed', 'fireplace'].includes(objDef.type)) {
+      base.maxSearch = 1;
+    }
+    return {
+      id: `${sceneId}_${objDef.type}_${objDef.x}_${objDef.z}`,
+      roomId: sceneId,
+      type: objDef.type,
+      gridX: objDef.x,
+      gridZ: objDef.z,
+      ...base,
+      ...objDef // 允许剧本覆盖默认值
+    };
+  }
+
+  function getObjectState(gx, gz) {
+    if (!gameState || !gameState.objects) return null;
+    return gameState.objects.find(o => o.gridX === gx && o.gridZ === gz) || null;
+  }
+
+  function setObjectState(gx, gz, updates) {
+    const obj = getObjectState(gx, gz);
+    if (!obj) return false;
+    Object.assign(obj, updates);
     return true;
   }
-  function resetAP() { actionPoints.current = actionPoints.max; }
-  function setAPMax(max) { actionPoints.max = max; actionPoints.current = max; }
+
+  function getRoomObjects(sceneId) {
+    if (!gameState || !gameState.objects) return [];
+    return gameState.objects.filter(o => o.roomId === sceneId);
+  }
+
+  function advanceObjectState(gx, gz) {
+    const obj = getObjectState(gx, gz);
+    if (!obj) return null;
+    if (obj.state === OBJECT_STATES.UNSEARCHED) {
+      obj.state = OBJECT_STATES.CLUE_FOUND;
+      obj.searchCount++;
+    } else if (obj.state === OBJECT_STATES.CLUE_FOUND) {
+      obj.state = OBJECT_STATES.RESOLVED;
+    }
+    return obj.state;
+  }
+
+  function canSearchObject(gx, gz) {
+    const obj = getObjectState(gx, gz);
+    if (!obj) return false;
+    if (obj.state === OBJECT_STATES.RESOLVED) return false;
+    if (obj.searchCount >= obj.maxSearch) return false;
+    return true;
+  }
+
+  // ========== 行动点数系统（从gameState读写） ==========
+  let actionPoints = { current: 3, max: 3 }; // 向后兼容，初始化时同步
+
+  function getAP() { 
+    if (gameState && gameState.actionPoints) return { ...gameState.actionPoints };
+    return { ...actionPoints }; 
+  }
+  function consumeAP(cost) {
+    const ap = gameState ? gameState.actionPoints : actionPoints;
+    if (ap.current < cost) return false;
+    ap.current -= cost;
+    if (gameState) actionPoints = { ...gameState.actionPoints };
+    return true;
+  }
+  function resetAP() { 
+    const ap = gameState ? gameState.actionPoints : actionPoints;
+    ap.current = ap.max;
+    if (gameState) actionPoints = { ...gameState.actionPoints };
+  }
+  function setAPMax(max) { 
+    const ap = gameState ? gameState.actionPoints : actionPoints;
+    ap.max = max; ap.current = max;
+    if (gameState) actionPoints = { ...gameState.actionPoints };
+  }
 
   // ========== 预设剧本（降级用） ==========
   const SCENARIOS = {
@@ -530,15 +619,99 @@ const DMEngine = (() => {
   }
 
   // ========== 世界状态引擎 ==========
+  function initGameState(scenarioId, scenario) {
+    // 构建房间状态
+    const rooms = {};
+    const allObjects = [];
+    scenario.scenes.forEach(scene => {
+      rooms[scene.id] = {
+        id: scene.id,
+        name: scene.name,
+        visited: false,
+        lightLevel: scene.atmosphere?.lightIntensity || 0.5,
+        template: scene.room,
+        width: scene.width,
+        height: scene.height
+      };
+      // 构建对象状态
+      if (scene.objects) {
+        scene.objects.forEach(obj => {
+          allObjects.push(createObjectState(obj, scene.id));
+        });
+      }
+    });
+
+    // 标记起始房间为已访问
+    if (scenario.scenes.length > 0) {
+      rooms[scenario.scenes[0].id].visited = true;
+    }
+
+    gameState = {
+      meta: {
+        scenarioId: scenarioId,
+        currentSceneId: scenario.scenes[0]?.id || 'arrival',
+        currentSceneIndex: 0,
+        turnCount: 0,
+        phase: 'exploration' // exploration / combat / dialogue
+      },
+      player: null, // 由registerPlayer填充
+      rooms: rooms,
+      objects: allObjects,
+      clues: [],   // { id, name, description, sourceObjectId, discovered: false }
+      events: [],  // { id, triggered: false }
+      inventory: [],
+      flags: {},
+      actionPoints: { current: 3, max: 3 }
+    };
+
+    // 向后兼容：worldState指向gameState的简化视图
+    syncWorldState();
+
+    return gameState;
+  }
+
+  // 同步worldState（向后兼容）
+  function syncWorldState() {
+    if (!gameState) { worldState = {}; return; }
+    worldState = {
+      scenarioId: gameState.meta.scenarioId,
+      currentSceneIndex: gameState.meta.currentSceneIndex,
+      visitedScenes: Object.values(gameState.rooms).filter(r => r.visited).map(r => r.id),
+      inventory: gameState.inventory,
+      flags: gameState.flags,
+      turnCount: gameState.meta.turnCount
+    };
+  }
+
+  function registerPlayer(playerData) {
+    if (!gameState) return;
+    gameState.player = {
+      name: playerData.name || '调查员',
+      position: { x: 0, z: 0 },
+      hp: playerData.derived?.hp,
+      maxHp: playerData.derived?.maxHp,
+      san: playerData.derived?.san,
+      maxSan: playerData.derived?.maxSan,
+      mp: playerData.derived?.mp,
+      maxMp: playerData.derived?.maxMp,
+      ap: gameState.actionPoints,
+      weapon: '拳头',
+      skills: playerData.skills || {},
+      stats: playerData.stats || {}
+    };
+  }
+
+  function getGameState() { return gameState; }
+
   function initWorld(scenarioId) {
     // 如果有动态剧本（AI生成），使用动态剧本
     if (dynamicScenario) {
-      worldState = { scenarioId: 'dynamic', currentSceneIndex: 0, visitedScenes: [], inventory: [], flags: {}, turnCount: 0 };
       narrativeHistory = [];
       facts = [];
       npcStates = {};
       plotState = 'intro';
       resetAP();
+      const gs = initGameState('dynamic', dynamicScenario);
       addFact('scenario', dynamicScenario.title);
       addFact('location', dynamicScenario.scenes[0].name);
       return dynamicScenario;
@@ -553,12 +726,12 @@ const DMEngine = (() => {
     const scenario = SCENARIOS[randomId];
     if (!scenario) return null;
     
-    worldState = { scenarioId: randomId, currentSceneIndex: 0, visitedScenes: [], inventory: [], flags: {}, turnCount: 0 };
     narrativeHistory = [];
     facts = [];
     npcStates = {};
     plotState = 'intro';
     resetAP();
+    const gs = initGameState(randomId, scenario);
     addFact('scenario', scenario.title);
     addFact('location', scenario.scenes[0].name);
     return scenario;
@@ -877,11 +1050,10 @@ const DMEngine = (() => {
   function getWorldState() { return worldState; }
   function getHistory() { return narrativeHistory; }
   function getPlotState() { return plotState; }
-  function getInventory() { return worldState.inventory || []; }
-  function getScenarioList() { return Object.keys(SCENARIOS).map(k => ({ id: k, ...SCENARIOS[k] })); }
+  function getInventory() { return gameState ? gameState.inventory : (worldState.inventory || []); }
 
   function saveState() {
-    return { worldState, narrativeHistory, facts, npcStates, plotState, actionPoints, dynamicScenario };
+    return { worldState, narrativeHistory, facts, npcStates, plotState, actionPoints, dynamicScenario, gameState };
   }
 
   function loadState(data) {
@@ -893,6 +1065,26 @@ const DMEngine = (() => {
     plotState = data.plotState || 'intro';
     if (data.actionPoints) actionPoints = { ...actionPoints, ...data.actionPoints };
     if (data.dynamicScenario) dynamicScenario = data.dynamicScenario;
+    // 恢复gameState
+    if (data.gameState) {
+      gameState = data.gameState;
+      syncWorldState();
+    } else if (data.worldState && data.worldState.scenarioId) {
+      // 旧存档兼容：从worldState重建gameState
+      const scenario = dynamicScenario || SCENARIOS[data.worldState.scenarioId];
+      if (scenario) {
+        initGameState(data.worldState.scenarioId, scenario);
+        gameState.meta.currentSceneIndex = data.worldState.currentSceneIndex || 0;
+        gameState.meta.turnCount = data.worldState.turnCount || 0;
+        gameState.inventory = data.worldState.inventory || [];
+        gameState.flags = data.worldState.flags || {};
+        if (data.worldState.visitedScenes) {
+          data.worldState.visitedScenes.forEach(id => {
+            if (gameState.rooms[id]) gameState.rooms[id].visited = true;
+          });
+        }
+      }
+    }
   }
 
   return {
@@ -906,6 +1098,11 @@ const DMEngine = (() => {
     generateScenarioFromSurvey,
     applyNarrativeEffect,
     addFact, getFacts, validateNarration,
-    saveState, loadState
+    saveState, loadState,
+    // ===== 统一GameState API（Phase 1新增） =====
+    getGameState, registerPlayer,
+    getObjectState, setObjectState, getRoomObjects,
+    advanceObjectState, canSearchObject,
+    OBJECT_STATES
   };
 })();
