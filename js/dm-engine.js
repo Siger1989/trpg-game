@@ -1373,7 +1373,7 @@ const DMEngine = (() => {
     processChoice, processFreeInput,
     getCurrentScene, getNarration, getChoices,
     getWorldState, getHistory, getPlotState,
-    getInventory, getScenarioList,
+    getInventory,
     getAP, consumeAP, resetAP, setAPMax,
     generateScenarioFromSurvey,
     applyNarrativeEffect,
