@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>模型预览 - 暗夜跑团</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a14;
+      color: #c9a04e;
+      font-family: 'Segoe UI', sans-serif;
+      overflow: hidden;
+      height: 100vh;
+    }
+    #preview-container {
+      width: 100%;
+      height: 100vh;
+      position: relative;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* 控制面板 */
+    .controls {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      background: rgba(10,10,18,0.92);
+      border: 1px solid rgba(201,160,78,0.3);
+      border-radius: 8px;
+      padding: 16px;
+      min-width: 220px;
+      z-index: 10;
+    }
+    .controls h2 {
+      font-size: 16px;
+      margin-bottom: 12px;
+      color: #c9a04e;
+    }
+    .controls label {
+      display: block;
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 4px;
+      margin-top: 10px;
+    }
+    .controls select, .controls input[type="range"] {
+      width: 100%;
+      background: #1a1a24;
+      color: #c9a04e;
+      border: 1px solid rgba(201,160,78,0.3);
+      border-radius: 4px;
+      padding: 6px 8px;
+      font-size: 13px;
+    }
+    .controls input[type="range"] {
+      -webkit-appearance: none;
+      height: 6px;
+      padding: 0;
+      border: none;
+      background: #333;
+      border-radius: 3px;
+    }
+    .controls input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      background: #c9a04e;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    /* 动作按钮 */
+    .action-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .action-btn {
+      padding: 5px 10px;
+      background: rgba(201,160,78,0.1);
+      border: 1px solid rgba(201,160,78,0.3);
+      border-radius: 4px;
+      color: #c9a04e;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .action-btn:hover {
+      background: rgba(201,160,78,0.2);
+      border-color: #c9a04e;
+    }
+    .action-btn.active {
+      background: rgba(201,160,78,0.3);
+      border-color: #c9a04e;
+      color: #fff;
+    }
+
+    /* 状态信息 */
+    .status {
+      position: fixed;
+      bottom: 16px;
+      left: 16px;
+      background: rgba(10,10,18,0.85);
+      border: 1px solid rgba(201,160,78,0.2);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #888;
+      z-index: 10;
+    }
+    .status .ok { color: #4a4; }
+    .status .err { color: #c44; }
+
+    /* 模型选择 */
+    .model-select {
+      margin-top: 8px;
+    }
+    .model-select option { background: #1a1a24; }
+
+    /* 提示文字 */
+    .hint {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      font-size: 11px;
+      color: #555;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div id="preview-container"></div>
+
+  <div class="controls">
+    <h2>🎭 模型预览</h2>
+    
+    <label>选择模型</label>
+    <div class="model-select">
+      <select id="model-url">
+        <option value="assets/monster.glb">monster.glb (默认)</option>
+      </select>
+    </div>
+    <button class="action-btn" id="btn-load" style="margin-top:8px;width:100%">加载模型</button>
+
+    <label>可用动作</label>
+    <div class="action-list" id="action-list">
+      <span style="color:#555;font-size:12px">加载模型后显示...</span>
+    </div>
+
+    <label>缩放</label>
+    <input type="range" id="scale-slider" min="0.1" max="3" step="0.1" value="0.5">
+    <span id="scale-value" style="font-size:12px;color:#888">0.5</span>
+
+    <label>旋转速度</label>
+    <input type="range" id="rotate-slider" min="0" max="2" step="0.1" value="0.5">
+  </div>
+
+  <div class="status" id="status">
+    初始化中...
+  </div>
+
+  <div class="hint">鼠标拖拽旋转 | 滚轮缩放 | 右键平移</div>
+
+  <!-- Three.js -->
+  <script src="js/three.min.js"></script>
+  <script src="js/GLTFLoader.js"></script>
+  <script src="js/camera-controls.js"></script>
+
+  <script>
+    // ========== 预览场景初始化 ==========
+    const container = document.getElementById('preview-container');
+    const statusEl = document.getElementById('status');
+    const actionListEl = document.getElementById('action-list');
+    const scaleSlider = document.getElementById('scale-slider');
+    const scaleValue = document.getElementById('scale-value');
+    const rotateSlider = document.getElementById('rotate-slider');
+
+    // Three.js基础
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a14);
+    scene.fog = new THREE.FogExp2(0x0a0a14, 0.01);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(3, 3, 3);
+    camera.lookAt(0, 1, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    container.appendChild(renderer.domElement);
+
+    // 相机控制器
+    let controls = null;
+    if (typeof CameraControls !== 'undefined') {
+      controls = CameraControls.init(camera, renderer.domElement);
+      controls.setSpherical(5, Math.PI / 4, Math.PI / 4);
+    }
+
+    // 灯光
+    const ambient = new THREE.AmbientLight(0x8888aa, 0.8);
+    scene.add(ambient);
+    const hemi = new THREE.HemisphereLight(0x8888cc, 0x444422, 0.6);
+    scene.add(hemi);
+    const dirLight = new THREE.DirectionalLight(0xffeedd, 1.0);
+    dirLight.position.set(5, 8, 5);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.set(1024, 1024);
+    scene.add(dirLight);
+
+    // 地面参考（格子线）
+    const gridHelper = new THREE.GridHelper(10, 10, 0x333344, 0x222233);
+    scene.add(gridHelper);
+
+    // 中心标记
+    const centerGeo = new THREE.RingGeometry(0.3, 0.5, 16);
+    const centerMat = new THREE.MeshBasicMaterial({ color: 0xc9a04e, side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
+    const centerRing = new THREE.Mesh(centerGeo, centerMat);
+    centerRing.rotation.x = -Math.PI / 2;
+    centerRing.position.y = 0.01;
+    scene.add(centerRing);
+
+    // ========== 模型管理 ==========
+    let currentModel = null;
+    let mixer = null;
+    let actions = {};
+    let currentActionName = '';
+    const clock = new THREE.Clock();
+    let autoRotateSpeed = 0.5;
+
+    function loadModel(url) {
+      statusEl.innerHTML = `<span>⏳ 加载中: ${url}...</span>`;
+
+      // 清除旧模型
+      if (currentModel) {
+        scene.remove(currentModel);
+        currentModel = null;
+      }
+      mixer = null;
+      actions = {};
+      currentActionName = '';
+
+      if (typeof THREE.GLTFLoader === 'undefined') {
+        statusEl.innerHTML = '<span class="err">❌ THREE.GLTFLoader 不可用</span>';
+        return;
+      }
+
+      const loader = new THREE.GLTFLoader();
+      loader.load(url, (gltf) => {
+        const model = gltf.scene;
+        const scale = parseFloat(scaleSlider.value);
+        model.scale.set(scale, scale, scale);
+        model.traverse(child => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
+        scene.add(model);
+        currentModel = model;
+
+        // 动画
+        if (gltf.animations && gltf.animations.length > 0) {
+          mixer = new THREE.AnimationMixer(model);
+          gltf.animations.forEach(clip => {
+            const action = mixer.clipAction(clip);
+            actions[clip.name.toLowerCase()] = action;
+          });
+          
+          // 更新动作列表UI
+          updateActionList();
+          
+          // 默认播放idle或第一个
+          playAction('idle') || playAction(Object.keys(actions)[0]);
+        } else {
+          actionListEl.innerHTML = '<span style="color:#555;font-size:12px">无动画</span>';
+        }
+
+        // 计算模型包围盒，调整相机
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        statusEl.innerHTML = `<span class="ok">✅ 加载成功</span> | 尺寸: ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)} | 动画: ${gltf.animations.length}个`;
+
+      }, 
+      (progress) => {
+        if (progress.total > 0) {
+          const pct = Math.round(progress.loaded / progress.total * 100);
+          statusEl.innerHTML = `<span>⏳ 加载中: ${pct}%</span>`;
+        }
+      },
+      (err) => {
+        statusEl.innerHTML = `<span class="err">❌ 加载失败: ${err.message || err}</span>`;
+        console.error('模型加载失败:', err);
+      });
+    }
+
+    function playAction(name) {
+      if (!mixer || !actions[name]) return false;
+      const action = actions[name];
+      if (currentActionName === name) return true;
+      // 淡出旧动作
+      const oldAction = actions[currentActionName];
+      if (oldAction && oldAction !== action) oldAction.fadeOut(0.3);
+      action.reset().fadeIn(0.3).play();
+      currentActionName = name;
+      
+      // 更新按钮高亮
+      document.querySelectorAll('.action-btn[data-action]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.action === name);
+      });
+      return true;
+    }
+
+    function updateActionList() {
+      const names = Object.keys(actions);
+      if (names.length === 0) {
+        actionListEl.innerHTML = '<span style="color:#555;font-size:12px">无动画</span>';
+        return;
+      }
+      actionListEl.innerHTML = names.map(name => 
+        `<button class="action-btn${name === currentActionName ? ' active' : ''}" data-action="${name}">${name}</button>`
+      ).join('');
+      
+      actionListEl.querySelectorAll('.action-btn').forEach(btn => {
+        btn.addEventListener('click', () => playAction(btn.dataset.action));
+      });
+    }
+
+    // ========== 事件绑定 ==========
+    document.getElementById('btn-load').addEventListener('click', () => {
+      const url = document.getElementById('model-url').value;
+      loadModel(url);
+    });
+
+    scaleSlider.addEventListener('input', () => {
+      const v = parseFloat(scaleSlider.value);
+      scaleValue.textContent = v.toFixed(1);
+      if (currentModel) currentModel.scale.set(v, v, v);
+    });
+
+    rotateSlider.addEventListener('input', () => {
+      autoRotateSpeed = parseFloat(rotateSlider.value);
+    });
+
+    // 窗口resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ========== 渲染循环 ==========
+    function animate() {
+      requestAnimationFrame(animate);
+      
+      const delta = clock.getDelta();
+      
+      // 更新动画混合器
+      if (mixer) mixer.update(delta);
+      
+      // 自动旋转模型
+      if (currentModel && autoRotateSpeed > 0) {
+        currentModel.rotation.y += autoRotateSpeed * delta;
+      }
+      
+      // 更新相机控制器
+      if (controls && controls.update) controls.update();
+      
+      renderer.render(scene, camera);
+    }
+
+    // ========== 启动 ==========
+    statusEl.innerHTML = '<span class="ok">✅ 场景就绪</span> | 点击"加载模型"开始';
+    
+    // 自动加载默认模型
+    loadModel('assets/monster.glb');
+    
+    animate();
+  </script>
+</body>
+</html>

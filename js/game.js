@@ -367,8 +367,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const actions = document.getElementById('quick-actions'); if (!actions) return; actions.innerHTML = '';
     const apDiv = document.createElement('div'); apDiv.className='ap-display'; apDiv.id='ap-display';
     const ap = DMEngine.getAP(); apDiv.textContent = `⚡AP:${ap.current}/${ap.max}`; actions.appendChild(apDiv);
-    const moveBtn = document.createElement('button'); moveBtn.className='action-btn move-mode-btn'; moveBtn.textContent='🚶 移动';
-    moveBtn.addEventListener('click', () => toggleMoveMode()); actions.appendChild(moveBtn);
     const endBtn = document.createElement('button'); endBtn.className='action-btn'; endBtn.textContent='⏭ 结束回合';
     endBtn.addEventListener('click', () => { DMEngine.resetAP(); UI.updateHUD(); UI.addNarration('回合结束，行动点数已恢复。','system'); showChoices(DMEngine.getChoices()); });
     actions.appendChild(endBtn);
@@ -376,7 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function handleChoice(actionId) {
-    if (moveMode) exitMoveMode();
+    if (moveMode) { moveMode = false; if (typeof CameraControls !== 'undefined' && CameraControls.setEnabled) CameraControls.setEnabled(true); }
     if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！请结束回合。','system'); return; }
     const result = DMEngine.processChoice(actionId); if (!result) return;
     UI.addNarration(result.narration, 'dm');
@@ -475,7 +473,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('player-input').addEventListener('keydown', (e) => { if(e.key==='Enter') sendPlayerInput(); });
 
   async function sendPlayerInput() {
-    if(moveMode){UI.addNarration('移动模式中，请先停止移动再输入指令。','system');return;}
+    if(moveMode){UI.addNarration('移动中，请先停止再输入指令。','system');return;}
     const input = document.getElementById('player-input'); const text = input.value.trim(); if(!text) return;
     UI.addNarration(`> ${text}`, 'player'); input.value = '';
 
@@ -548,41 +546,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const gameScreen = document.getElementById('screen-game');
     if (!gameScreen?.classList.contains('active')) return;
     if (CombatSystem.isInCombat()) return;
-    if (e.key === 'Escape' && moveMode) { exitMoveMode(); return; }
-    if ((e.key === 'm' || e.key === 'M') && document.activeElement?.id !== 'player-input') { toggleMoveMode(); return; }
-    if (moveMode) {
-      let moved = false;
-      switch(e.key) {
-        case 'w': case 'ArrowUp':    moved = SceneManager.movePlayer(0,-1); break;
-        case 's': case 'ArrowDown':  moved = SceneManager.movePlayer(0,1); break;
-        case 'a': case 'ArrowLeft':  moved = SceneManager.movePlayer(-1,0); break;
-        case 'd': case 'ArrowRight': moved = SceneManager.movePlayer(1,0); break;
-        case 'Enter': exitMoveMode(); return;
-      }
-      if (moved) {
-        e.preventDefault(); moveStepCount++;
-        // 移动消耗AP
-        if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！','system'); exitMoveMode(); return; }
-        const countEl = document.getElementById('move-step-count'); if(countEl) countEl.textContent = moveStepCount;
-        updateFog(); UI.updateHUD();
-      }
+    // WASD直接移动（无需进入移动模式）
+    let moved = false;
+    switch(e.key) {
+      case 'w': case 'ArrowUp':    moved = SceneManager.movePlayer(0,-1); break;
+      case 's': case 'ArrowDown':  moved = SceneManager.movePlayer(0,1); break;
+      case 'a': case 'ArrowLeft':  moved = SceneManager.movePlayer(-1,0); break;
+      case 'd': case 'ArrowRight': moved = SceneManager.movePlayer(1,0); break;
+    }
+    if (moved) {
+      e.preventDefault();
+      if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！','system'); return; }
+      updateFog(); UI.updateHUD();
     }
   });
 
-  // 移动端方向键
+  // 移动端方向键：直接移动
   document.querySelectorAll('.dpad-btn[data-dx]').forEach(btn => {
     btn.addEventListener('click', () => {
       const dx = parseInt(btn.dataset.dx);
       const dz = parseInt(btn.dataset.dz);
-      if (!moveMode) {
-        // 非移动模式：自动进入移动模式
-        enterMoveMode();
-      }
       const moved = SceneManager.movePlayer(dx, dz);
       if (moved) {
-        moveStepCount++;
-        if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); exitMoveMode(); return; }
-        const countEl = document.getElementById('move-step-count'); if (countEl) countEl.textContent = moveStepCount;
+        if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); return; }
         updateFog(); UI.updateHUD();
       }
     });
@@ -592,21 +578,15 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       const dx = parseInt(btn.dataset.dx);
       const dz = parseInt(btn.dataset.dz);
-      if (!moveMode) enterMoveMode();
-      // 立即移动一步
       const moved = SceneManager.movePlayer(dx, dz);
       if (moved) {
-        moveStepCount++;
-        if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); exitMoveMode(); return; }
-        const countEl = document.getElementById('move-step-count'); if (countEl) countEl.textContent = moveStepCount;
+        if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); return; }
         updateFog(); UI.updateHUD();
       }
-      // 长按连续移动
       longPressTimer = setInterval(() => {
         const m = SceneManager.movePlayer(dx, dz);
         if (m) {
-          moveStepCount++;
-          if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); exitMoveMode(); clearInterval(longPressTimer); return; }
+          if (!DMEngine.consumeAP(1)) { UI.addNarration('行动点数不足！', 'system'); clearInterval(longPressTimer); return; }
           const countEl = document.getElementById('move-step-count'); if (countEl) countEl.textContent = moveStepCount;
           updateFog(); UI.updateHUD();
         }
@@ -616,11 +596,11 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('touchcancel', () => { if (longPressTimer) { clearInterval(longPressTimer); longPressTimer = null; } });
   });
 
-  // 方向键中心按钮：切换移动模式
+  // 方向键中心按钮：清除路径
   const dpadCenter = document.getElementById('dpad-center');
   if (dpadCenter) {
     dpadCenter.addEventListener('click', () => {
-      toggleMoveMode();
+      if (typeof SceneManager !== 'undefined' && SceneManager.clearPathLine) SceneManager.clearPathLine();
     });
   }
 

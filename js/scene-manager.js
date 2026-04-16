@@ -202,6 +202,9 @@ const SceneManager = (() => {
     // 初始化物件标签叠加层
     initLabels(container);
 
+    // 3D场景点击事件：raycast检测格子，点击显示轨迹线/移动
+    initGridClick(container);
+
     // 开始渲染循环
     animate();
   }
@@ -266,6 +269,7 @@ const SceneManager = (() => {
     floor.receiveShadow = true;
     scene.add(floor);
     gridObjects.push(floor);
+    floorMesh = floor; // 保存引用，用于raycast点击检测
 
     // 格子线
     drawGrid(combatW, combatH);
@@ -915,14 +919,80 @@ const SceneManager = (() => {
     }
   }
 
+  // ========== 3D场景点击（Raycast→格子→轨迹线→移动） ==========
+
+  let raycaster = null;
+  let floorMesh = null; // 地板mesh引用，用于raycast
+
+  function initGridClick(container) {
+    raycaster = new THREE.Raycaster();
+    const canvas = renderer.domElement;
+
+    // 点击事件（区分点击和拖拽）
+    let mouseDownPos = null;
+    let mouseDownTime = 0;
+
+    canvas.addEventListener('pointerdown', (e) => {
+      mouseDownPos = { x: e.clientX, y: e.clientY };
+      mouseDownTime = performance.now();
+    });
+
+    canvas.addEventListener('pointerup', (e) => {
+      if (!mouseDownPos) return;
+      const dx = e.clientX - mouseDownPos.x;
+      const dy = e.clientY - mouseDownPos.y;
+      const dt = performance.now() - mouseDownTime;
+      // 短距离+短时间=点击，否则是拖拽
+      if (Math.sqrt(dx*dx + dy*dy) < 10 && dt < 500) {
+        handleSceneClick(e);
+      }
+      mouseDownPos = null;
+    });
+  }
+
+  function handleSceneClick(e) {
+    if (!camera || !currentRoom || !floorMesh) return;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObject(floorMesh);
+    if (intersects.length === 0) return;
+
+    const point = intersects[0].point;
+    const grid = worldToGrid(point.x, point.z);
+
+    if (grid.x < 0 || grid.x >= currentRoom.width || grid.z < 0 || grid.z >= currentRoom.height) return;
+
+    // 调用clickGrid逻辑
+    const result = clickGrid(grid.x, grid.z);
+    if (result === 'preview') {
+      // 第一次点击：显示路径
+    } else if (result === 'move') {
+      // 第二次点击：执行移动
+    }
+  }
+
   // ========== GLB模型加载 ==========
 
   // 加载monster.glb替换主角
   function loadPlayerModel(url) {
-    console.log('loadPlayerModel called with:', url);
+    console.log('[SceneManager] loadPlayerModel called with:', url);
+    
+    // 检查GLTFLoader是否可用
+    if (typeof THREE.GLTFLoader === 'undefined') {
+      console.error('[SceneManager] THREE.GLTFLoader 不可用，请确保GLTFLoader.js已加载');
+      return;
+    }
+    
     const loader = new THREE.GLTFLoader();
     loader.load(url, (gltf) => {
-      console.log('GLB模型加载成功:', gltf);
+      console.log('[SceneManager] GLB模型加载成功:', gltf);
+      console.log('[SceneManager] 动画列表:', gltf.animations.map(a => a.name));
       const model = gltf.scene;
       // 缩放适配格子大小
       model.scale.set(0.5, 0.5, 0.5);
@@ -933,6 +1003,7 @@ const SceneManager = (() => {
           const action = playerMixer.clipAction(clip);
           playerActions[clip.name.toLowerCase()] = action;
         });
+        console.log('[SceneManager] 可用动作:', Object.keys(playerActions));
         // 默认播放idle或第一个动画
         playAction('idle') || playAction(Object.keys(playerActions)[0]);
       }
@@ -968,6 +1039,16 @@ const SceneManager = (() => {
     action.reset().fadeIn(0.3).play();
     currentAction = name;
     return true;
+  }
+
+  // 获取可用动作列表
+  function getAvailableActions() {
+    return Object.keys(playerActions);
+  }
+
+  // 获取当前动作名
+  function getCurrentAction() {
+    return currentAction;
   }
 
   // ========== 玩家移动 ==========
@@ -1115,6 +1196,8 @@ const SceneManager = (() => {
     gridObjects.length = 0;
     sceneObjects.length = 0;
     currentRoom = null;
+    floorMesh = null; // 清除地板引用
+    clearPathLine(); // 清除轨迹线
     // 清理标签
     labelElements.forEach(el => el.remove());
     labelElements = [];
@@ -1536,6 +1619,7 @@ const SceneManager = (() => {
     centerCameraOnRoom, setObjectInteractionHandler,
     toggleObjectLight, toggleDoor, highlightObject,
     canInteract, getInteractDistance, INTERACT_RANGE,
-    showPathLine, clearPathLine, loadPlayerModel, clickGrid
+    showPathLine, clearPathLine, loadPlayerModel, clickGrid,
+    playAction, getAvailableActions, getCurrentAction
   };
 })();
