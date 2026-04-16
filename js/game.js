@@ -83,42 +83,53 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-about-back').addEventListener('click', () => UI.showScreen('menu'));
 
   // 角色创建
-  // 职业到头像的映射
-  const OCCUPATION_PORTRAITS = {
-    '私家侦探': '01_Detective.png',
-    '医生': '02_Doctor.png',
-    '教授': '03_Professor.png',
-    '牧师': '04_Priest.png',
-    '记者': '05_Journalist.png',
-    '律师': '06_Lawyer.png',
-    '工程师': '07_Engineer.png',
-    '飞行员': '08_Pilot.png',
-    '护士': '09_Nurse.png',
-    '摄影师': '10_Photographer.png',
-    '音乐家': '11_Musician.png',
-    '演员': '12_Actor.png',
-    '科学家': '13_Scientist.png',
-    '军人': '14_Soldier.png',
-    '海员': '15_Sailor.png',
-    '探险家': '16_Explorer.png',
-    '图书馆管理员': '17_Librarian.png',
-    '作家': '18_Writer.png',
-    '考古学家': '19_Archaeologist.png',
-    '艺术家': '20_Artist.png'
-  };
+  // 头像列表（独立于职业）
+  const PORTRAIT_LIST = [
+    { file: '01_Detective.png', name: '私家侦探' },
+    { file: '02_Doctor.png', name: '医生' },
+    { file: '03_Professor.png', name: '教授' },
+    { file: '04_Priest.png', name: '牧师' },
+    { file: '05_Journalist.png', name: '记者' },
+    { file: '06_Lawyer.png', name: '律师' },
+    { file: '07_Engineer.png', name: '工程师' },
+    { file: '08_Pilot.png', name: '飞行员' },
+    { file: '09_Nurse.png', name: '护士' },
+    { file: '10_Photographer.png', name: '摄影师' },
+    { file: '11_Musician.png', name: '音乐家' },
+    { file: '12_Actor.png', name: '演员' },
+    { file: '13_Scientist.png', name: '科学家' },
+    { file: '14_Soldier.png', name: '军人' },
+    { file: '15_Sailor.png', name: '海员' },
+    { file: '16_Explorer.png', name: '探险家' },
+    { file: '17_Librarian.png', name: '图书馆员' },
+    { file: '18_Writer.png', name: '作家' },
+    { file: '19_Archaeologist.png', name: '考古学家' },
+    { file: '20_Artist.png', name: '艺术家' }
+  ];
   let charStats = null, charDerived = null, selectedOcc = null;
-  let selectedPortrait = '01_Detective.png';
+  let selectedPortraitIndex = 0;
 
   function initCharCreate() {
     charStats = CoCRules.rollStats();
     charDerived = CoCRules.calcDerived(charStats);
     selectedOcc = null;
-    selectedPortrait = '01_Detective.png';
+    selectedPortraitIndex = 0;
     renderAttrGrid(); renderOccupations(); renderPortrait();
     if (charCreateBound) return;
     charCreateBound = true;
 
     document.getElementById('btn-reroll').addEventListener('click', () => { charStats = CoCRules.rollStats(); charDerived = CoCRules.calcDerived(charStats); renderAttrGrid(); });
+    
+    // 头像切换按钮
+    document.getElementById('btn-portrait-prev').addEventListener('click', () => {
+      selectedPortraitIndex = (selectedPortraitIndex - 1 + PORTRAIT_LIST.length) % PORTRAIT_LIST.length;
+      renderPortrait();
+    });
+    document.getElementById('btn-portrait-next').addEventListener('click', () => {
+      selectedPortraitIndex = (selectedPortraitIndex + 1) % PORTRAIT_LIST.length;
+      renderPortrait();
+    });
+    
     document.getElementById('btn-confirm-char').addEventListener('click', () => {
       const name = document.getElementById('char-name').value.trim() || '无名调查员';
       const background = document.getElementById('char-background').value.trim();
@@ -129,7 +140,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const perSkill = Math.floor(charStats.EDU * 4 / occSkills.length);
         occSkills.forEach(sn => { if (skills[sn] !== undefined) skills[sn] += perSkill; });
       }
-      GameState.createPlayer({ name, stats: charStats, derived: charDerived, skills, occupation: selectedOcc, background, portrait: selectedPortrait });
+      const portraitFile = PORTRAIT_LIST[selectedPortraitIndex].file;
+      GameState.createPlayer({ name, stats: charStats, derived: charDerived, skills, occupation: selectedOcc, background, portrait: portraitFile });
       UI.showScreen('scenario-survey');
       initSurvey();
     });
@@ -160,9 +172,6 @@ document.addEventListener('DOMContentLoaded', () => {
         ol.querySelectorAll('.occ-btn').forEach(b => b.classList.remove('selected')); 
         btn.classList.add('selected'); 
         selectedOcc = name; 
-        // 切换对应头像
-        selectedPortrait = OCCUPATION_PORTRAITS[name] || '01_Detective.png';
-        renderPortrait();
       });
       ol.appendChild(btn);
     });
@@ -170,7 +179,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderPortrait() { 
     const img = document.getElementById('char-portrait'); 
-    if (img) img.src = 'assets/portraits/' + selectedPortrait;
+    const nameEl = document.getElementById('portrait-name');
+    if (img) img.src = 'assets/portraits/' + PORTRAIT_LIST[selectedPortraitIndex].file;
+    if (nameEl) nameEl.textContent = PORTRAIT_LIST[selectedPortraitIndex].name;
   }
 
   // ========== 块2：问卷流程 ==========
