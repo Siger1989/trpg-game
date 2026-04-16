@@ -45,9 +45,9 @@ const UI = (() => {
     if (apEl) { apEl.textContent = `⚡AP:${ap.current}/${ap.max}`; apEl.className = 'ap-display' + (ap.current <= 1 ? ' ap-low' : ''); }
     const scene = DMEngine.getCurrentScene();
     if (scene) { const loc = document.getElementById('hud-location'); if (loc) loc.textContent = scene.name; }
-    if (player.appearance && typeof PaperDoll !== 'undefined') {
-      const mc = document.getElementById('hud-portrait');
-      if (mc) PaperDoll.render(mc, player.appearance);
+    if (player.portrait) {
+      const img = document.getElementById('hud-portrait');
+      if (img) img.src = 'assets/portraits/' + player.portrait;
     }
   }
   function setBar(type, cur, max) {
@@ -83,33 +83,42 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-about-back').addEventListener('click', () => UI.showScreen('menu'));
 
   // 角色创建
-  const partLabels = {
-    hair: ['短发','中发','长发','马尾','卷发','寸头','偏分','双马尾','波浪','丸子头','莫西干','大背头','波波头','编辫','刘海','飞机头','光头(留茬)','侧剃','复古卷','披肩'],
-    face: ['圆脸','方脸','瓜子脸','长脸','心形脸','菱形脸','鹅蛋脸','国字脸'],
-    expr: ['平静','严肃','微笑','惊讶','恐惧'],
-    outfit: ['风衣','西装','工装','长裙','实验服','警服','教袍','皮夹克','运动装','休闲装']
+  // 职业到头像的映射
+  const OCCUPATION_PORTRAITS = {
+    '私家侦探': '01_Detective.png',
+    '医生': '02_Doctor.png',
+    '教授': '03_Professor.png',
+    '牧师': '04_Priest.png',
+    '记者': '05_Journalist.png',
+    '律师': '06_Lawyer.png',
+    '工程师': '07_Engineer.png',
+    '飞行员': '08_Pilot.png',
+    '护士': '09_Nurse.png',
+    '摄影师': '10_Photographer.png',
+    '音乐家': '11_Musician.png',
+    '演员': '12_Actor.png',
+    '科学家': '13_Scientist.png',
+    '军人': '14_Soldier.png',
+    '海员': '15_Sailor.png',
+    '探险家': '16_Explorer.png',
+    '图书馆管理员': '17_Librarian.png',
+    '作家': '18_Writer.png',
+    '考古学家': '19_Archaeologist.png',
+    '艺术家': '20_Artist.png'
   };
   let charStats = null, charDerived = null, selectedOcc = null;
-  let charAppearance = { hair: 0, face: 0, expr: 0, outfit: 0, skinTone: 0 };
+  let selectedPortrait = '01_Detective.png';
 
   function initCharCreate() {
     charStats = CoCRules.rollStats();
     charDerived = CoCRules.calcDerived(charStats);
     selectedOcc = null;
-    charAppearance = { hair: 0, face: 0, expr: 0, outfit: 0, skinTone: 0 };
-    renderAttrGrid(); renderOccupations(); renderPaperdoll();
+    selectedPortrait = '01_Detective.png';
+    renderAttrGrid(); renderOccupations(); renderPortrait();
     if (charCreateBound) return;
     charCreateBound = true;
 
     document.getElementById('btn-reroll').addEventListener('click', () => { charStats = CoCRules.rollStats(); charDerived = CoCRules.calcDerived(charStats); renderAttrGrid(); });
-    document.querySelectorAll('.sel-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const part = btn.dataset.part, dir = parseInt(btn.dataset.dir), maxLen = partLabels[part].length;
-        charAppearance[part] = (charAppearance[part] + dir + maxLen) % maxLen;
-        document.getElementById(`${part}-label`).textContent = partLabels[part][charAppearance[part]];
-        renderPaperdoll();
-      });
-    });
     document.getElementById('btn-confirm-char').addEventListener('click', () => {
       const name = document.getElementById('char-name').value.trim() || '无名调查员';
       const background = document.getElementById('char-background').value.trim();
@@ -120,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const perSkill = Math.floor(charStats.EDU * 4 / occSkills.length);
         occSkills.forEach(sn => { if (skills[sn] !== undefined) skills[sn] += perSkill; });
       }
-      GameState.createPlayer({ name, stats: charStats, derived: charDerived, skills, occupation: selectedOcc, background, appearance: { ...charAppearance } });
+      GameState.createPlayer({ name, stats: charStats, derived: charDerived, skills, occupation: selectedOcc, background, portrait: selectedPortrait });
       UI.showScreen('scenario-survey');
       initSurvey();
     });
@@ -146,12 +155,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const ol = document.getElementById('occupation-list'); if (!ol) return; ol.innerHTML = '';
     Object.entries(CoCRules.OCCUPATIONS).forEach(([name, occ]) => {
       const btn = document.createElement('button'); btn.className = 'occ-btn'; if (selectedOcc === name) btn.classList.add('selected');
-      btn.textContent = name; btn.addEventListener('click', () => { ol.querySelectorAll('.occ-btn').forEach(b => b.classList.remove('selected')); btn.classList.add('selected'); selectedOcc = name; });
+      btn.textContent = name; 
+      btn.addEventListener('click', () => { 
+        ol.querySelectorAll('.occ-btn').forEach(b => b.classList.remove('selected')); 
+        btn.classList.add('selected'); 
+        selectedOcc = name; 
+        // 切换对应头像
+        selectedPortrait = OCCUPATION_PORTRAITS[name] || '01_Detective.png';
+        renderPortrait();
+      });
       ol.appendChild(btn);
     });
   }
 
-  function renderPaperdoll() { const c = document.getElementById('paperdoll-canvas'); if (c && typeof PaperDoll !== 'undefined') PaperDoll.render(c, charAppearance); }
+  function renderPortrait() { 
+    const img = document.getElementById('char-portrait'); 
+    if (img) img.src = 'assets/portraits/' + selectedPortrait;
+  }
 
   // ========== 块2：问卷流程 ==========
   let surveyStep = 0, surveyAnswers = { mood: '', role: '', expect: '' }, surveyBound = false;

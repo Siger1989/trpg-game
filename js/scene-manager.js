@@ -883,15 +883,17 @@ const SceneManager = (() => {
     if (!path || path.length < 2) { if (callback) callback(); return; }
     animating = true;
     let step = 1; // 从第1格开始（第0格是当前位置）
+    const cost = path.length - 1; // 移动步数
+    // 扣除AP
+    if (typeof DMEngine !== 'undefined' && DMEngine.consumeAP) {
+      DMEngine.consumeAP(cost);
+    }
     function nextStep() {
       if (step >= path.length) {
         animating = false;
         clearPathLine();
         // 移动结束，回到idle
         playAction('idle') || playAction('Idle');
-        // 更新UI
-        if (typeof UI !== 'undefined' && UI.updateHUD) UI.updateHUD();
-        if (typeof GameState !== 'undefined' && GameState.saveGame) GameState.saveGame();
         if (callback) callback();
         return;
       }
@@ -921,49 +923,23 @@ const SceneManager = (() => {
     nextStep();
   }
 
-  // 点击格子：路径预览 → 确认移动
+  // 点击格子：直接寻路移动
   function clickGrid(gx, gz) {
     if (animating || !currentRoom) return 'busy';
     const pp = getPlayerPos();
     // 点击自己位置：忽略
     if (gx === pp.x && gz === pp.z) { clearPathLine(); return 'cancel'; }
-
-    // 检查是否在预览状态，点击的是目标格子
-    if (pathTarget && gx === pathTarget.x && gz === pathTarget.z) {
-      // 确认移动
-      const path = findPath(pp.x, pp.z, gx, gz);
-      if (!path) return 'blocked';
-      
-      // 检查AP是否足够（每格消耗1 AP）
-      const ap = typeof DMEngine !== 'undefined' ? DMEngine.getAP() : { current: 999, max: 999 };
-      const cost = path.length - 1; // 移动步数
-      if (ap.current >= cost) {
-        // 扣AP
-        if (typeof DMEngine !== 'undefined' && DMEngine.consumeAP) {
-          DMEngine.consumeAP(cost);
-        }
-        // 清除预览并移动
-        clearPathLine();
-        moveAlongPath(path);
-        pathTarget = null;
-        return 'move';
-      } else {
-        showRedPathLine(path);
-        return 'blocked';
-      }
-    }
-
-    // 第一次点击：显示路径预览
+    // 寻路并直接移动
     const path = findPath(pp.x, pp.z, gx, gz);
     if (!path) return 'blocked';
-
-    // 检查AP是否足够
+    
+    // 检查AP是否足够（每格消耗1 AP）
     const ap = typeof DMEngine !== 'undefined' ? DMEngine.getAP() : { current: 999, max: 999 };
-    const cost = path.length - 1;
+    const cost = path.length - 1; // 移动步数
     if (ap.current >= cost) {
       showPathLine(path); // 显示路径线
-      pathTarget = { x: gx, z: gz }; // 保存目标位置
-      return 'preview';
+      moveAlongPath(path); // 直接移动
+      return 'move';
     } else {
       showRedPathLine(path);
       return 'blocked';

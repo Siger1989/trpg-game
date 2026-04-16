@@ -24,9 +24,9 @@
   <!-- 角色创建 -->
   <div id="screen-char-create" class="screen">
     <div class="char-create-layout">
-      <!-- 左侧：纸娃娃预览 -->
+      <!-- 左侧：头像预览 -->
       <div class="char-preview-panel">
-        <canvas id="paperdoll-canvas" width="300" height="400"></canvas>
+        <img id="char-portrait" src="assets/portraits/01_Detective.png" alt="角色头像" style="width: 200px; height: 200px; object-fit: cover; border-radius: 8px; border: 2px solid #444;">
         <div class="char-name-input">
           <input type="text" id="char-name" placeholder="输入角色名..." maxlength="20">
         </div>
@@ -107,7 +107,7 @@
       <!-- 角色状态栏 -->
       <div class="hud-top">
         <div class="char-status">
-          <canvas id="hud-portrait" width="48" height="48"></canvas>
+          <img id="hud-portrait" src="assets/portraits/01_Detective.png" alt="头像" style="width: 48px; height: 48px; object-fit: cover; border-radius: 4px; border: 1px solid #666;">
           <div class="status-bars">
             <div class="bar hp-bar"><div class="bar-fill" id="hp-fill"></div><span id="hp-text">10/10</span></div>
             <div class="bar san-bar"><div class="bar-fill" id="san-fill"></div><span id="san-text">70/70</span></div>
